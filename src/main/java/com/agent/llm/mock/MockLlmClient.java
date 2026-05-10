@@ -35,7 +35,7 @@ public class MockLlmClient implements LlmClient {
             lastMessage = last.getContent();
         }
 
-        String text = "[Mock] 收到 " + messageCount + " 条消息，最后一条: " + lastMessage;
+        String text = "[Mock] 收到 " + messageCount + " 条历史消息。最新问题: " + lastMessage + "。模拟回答: 这是针对您问题的模拟回复，当前对话已累积 " + messageCount + " 条消息。";
 
         ChatResponse response = new ChatResponse();
         response.setId("mock-response-id");

@@ -3,6 +3,11 @@ package com.agent;
 import com.agent.config.AgentConfig;
 import com.agent.config.ConfigManager;
 import com.agent.llm.LlmClient;
+import com.agent.llm.model.ChatMessage;
+import com.agent.llm.model.ChatResponse;
+import com.agent.llm.model.ModelConfig;
+import com.agent.memory.ConversationMemory;
+import com.agent.memory.Message;
 import com.agent.resilience.RateLimiter;
 import com.agent.resilience.RetryPolicy;
 import com.agent.tracking.TokenTracker;
@@ -15,6 +20,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 
 import java.util.Arrays;
+import java.util.List;
 
 @SpringBootApplication
 public class Application {
@@ -27,7 +33,7 @@ public class Application {
 
     @Bean
     public CommandLineRunner run(LlmClient llmClient, ConfigManager configManager, RateLimiter rateLimiter,
-                                 TokenTracker tokenTracker, Environment env) {
+                                 TokenTracker tokenTracker, ConversationMemory memory, Environment env) {
         return args -> {
             configManager.printConfigSources();
             AgentConfig config = configManager.getConfig();
@@ -54,22 +60,39 @@ public class Application {
                 System.out.println("====================");
             }
 
-            String[] prompts = {
-                    "你好，请用一句话介绍你自己",
-                    "请解释一下什么是 Spring Boot",
-                    "用中文讲一个简短的笑话"
+            memory.setSystemPrompt("你是一个有帮助的 AI 助手。");
+
+            String[] userPrompts = {
+                    "我叫小明",
+                    "我喜欢Java",
+                    "我叫什么名字？",
+                    "我喜欢什么编程语言？",
+                    "目前对话用了多少token？"
             };
 
-            for (String prompt : prompts) {
-                System.out.println("=== 请求 ===");
-                System.out.println("Prompt: " + prompt);
-                String response = llmClient.ask(prompt);
-                System.out.println("=== LLM 回复 ===");
-                System.out.println(response);
-                System.out.println("================");
+            ModelConfig modelConfig = ModelConfig.builder().maxTokens(1024).build();
+
+            for (int i = 0; i < userPrompts.length; i++) {
+                String prompt = userPrompts[i];
+                System.out.println("\n=== 第 " + (i + 1) + " 轮对话 ===");
+                System.out.println("用户: " + prompt);
+
+                memory.addMessage(Message.user(prompt));
+
+                List<ChatMessage> chatMessages = memory.toChatMessages();
+                ChatResponse response = llmClient.chat(chatMessages, modelConfig);
+                String reply = response != null ? response.getFirstTextContent() : "(无回复)";
+
+                System.out.println("助手: " + reply);
+                memory.addMessage(Message.assistant(reply));
             }
 
-            System.out.println("=== Token 使用统计 ===");
+            System.out.println("\n=== 对话记忆统计 ===");
+            System.out.println("消息数量: " + memory.size());
+            System.out.println("估算 Token 数: " + memory.estimateTokenCount());
+            System.out.println("====================");
+
+            System.out.println("\n=== Token 使用统计 ===");
             System.out.println(tokenTracker.getSummary());
             System.out.println("====================");
         };
