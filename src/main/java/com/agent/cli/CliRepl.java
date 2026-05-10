@@ -2,11 +2,13 @@ package com.agent.cli;
 
 import com.agent.core.AgentLoop;
 import com.agent.core.AgentResponse;
+import com.agent.core.StreamingAgentLoop;
 import com.agent.memory.ConversationMemory;
 import com.agent.tracking.TokenTracker;
 import com.agent.tracking.UsageSummary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -21,6 +23,7 @@ public class CliRepl {
     private final Spinner spinner;
     private final ConversationMemory conversationMemory;
     private final TokenTracker tokenTracker;
+    private final StreamingAgentLoop streamingAgentLoop;
 
     public CliRepl(InputReader inputReader,
                    CommandHandler commandHandler,
@@ -28,7 +31,8 @@ public class CliRepl {
                    TerminalRenderer terminalRenderer,
                    Spinner spinner,
                    ConversationMemory conversationMemory,
-                   TokenTracker tokenTracker) {
+                   TokenTracker tokenTracker,
+                   @Autowired(required = false) StreamingAgentLoop streamingAgentLoop) {
         this.inputReader = inputReader;
         this.commandHandler = commandHandler;
         this.agentLoop = agentLoop;
@@ -36,6 +40,7 @@ public class CliRepl {
         this.spinner = spinner;
         this.conversationMemory = conversationMemory;
         this.tokenTracker = tokenTracker;
+        this.streamingAgentLoop = streamingAgentLoop;
     }
 
     public void start() {
@@ -65,23 +70,30 @@ public class CliRepl {
                 continue;
             }
 
-            // 调用 AgentLoop
-            spinner.start();
+            // 调用 AgentLoop（优先流式模式）
             AgentResponse response;
             try {
-                response = agentLoop.run(input);
+                if (streamingAgentLoop != null) {
+                    response = streamingAgentLoop.runStreaming(input);
+                } else {
+                    spinner.start();
+                    response = agentLoop.run(input);
+                    spinner.stop();
+                }
             } catch (Exception e) {
                 log.error("AgentLoop 执行出错", e);
                 spinner.stop();
                 System.out.println("错误: " + e.getMessage());
                 continue;
             }
-            spinner.stop();
 
-            String finalMessage = response.getFinalMessage();
-            if (finalMessage != null && !finalMessage.isEmpty()) {
-                String rendered = terminalRenderer.render(finalMessage);
-                System.out.println(rendered);
+            // 流式模式下文字已实时输出，非流式模式需要渲染最终结果
+            if (streamingAgentLoop == null) {
+                String finalMessage = response.getFinalMessage();
+                if (finalMessage != null && !finalMessage.isEmpty()) {
+                    String rendered = terminalRenderer.render(finalMessage);
+                    System.out.println(rendered);
+                }
             }
         }
 

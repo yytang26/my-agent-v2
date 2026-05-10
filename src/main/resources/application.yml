@@ -1,6 +1,7 @@
 agent:
   workspace-root: ${user.dir}
   sessions-dir: ${user.home}/.my-agent/sessions
+  streaming: true
   loop:
     max-iterations: 10
 

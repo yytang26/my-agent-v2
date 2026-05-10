@@ -3,7 +3,9 @@ package com.agent.llm;
 import com.agent.llm.model.ChatMessage;
 import com.agent.llm.model.ChatResponse;
 import com.agent.llm.model.ModelConfig;
+import com.agent.llm.model.StreamChunk;
 import com.agent.tool.ToolDefinition;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 
@@ -13,6 +15,10 @@ public interface LlmClient {
 
     default ChatResponse chat(List<ChatMessage> messages, ModelConfig config, List<ToolDefinition> tools) {
         return chat(messages, config);
+    }
+
+    default Flux<StreamChunk> chatStream(List<ChatMessage> messages, ModelConfig config, List<ToolDefinition> tools) {
+        throw new UnsupportedOperationException("Streaming not supported");
     }
 
     default String ask(String prompt) {
