@@ -1,4 +1,8 @@
+server:
+  port: 8080
+
 agent:
+  mode: web
   workspace-root: ${user.dir}
   sessions-dir: ${user.home}/.my-agent/sessions
   streaming: true

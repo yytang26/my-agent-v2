@@ -1,3 +1,6 @@
+server:
+  port: 8080
+
 llm:
   provider: mock
 
@@ -5,6 +8,7 @@ permission:
   auto-allow: true
 
 agent:
+  mode: web
   context:
     window-size: 200000
     compression:
