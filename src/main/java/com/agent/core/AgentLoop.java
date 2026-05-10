@@ -5,8 +5,10 @@ import com.agent.llm.model.ChatMessage;
 import com.agent.llm.model.ChatResponse;
 import com.agent.llm.model.ContentBlock;
 import com.agent.llm.model.ModelConfig;
+import com.agent.context.ContextCompressor;
 import com.agent.memory.ConversationMemory;
 import com.agent.memory.Message;
+import com.agent.memory.MessageRole;
 import com.agent.session.SessionManager;
 import com.agent.tool.ToolDefinition;
 import com.agent.tool.ToolExecutor;
@@ -33,11 +35,12 @@ public class AgentLoop {
     private final TokenTracker tokenTracker;
     private final AgentLoopConfig config;
     private final SessionManager sessionManager;
+    private final ContextCompressor contextCompressor;
 
     public AgentLoop(LlmClient llmClient, ConversationMemory memory,
                      ToolRegistry toolRegistry, ToolExecutor toolExecutor,
                      TokenTracker tokenTracker, AgentLoopConfig config,
-                     SessionManager sessionManager) {
+                     SessionManager sessionManager, ContextCompressor contextCompressor) {
         this.llmClient = llmClient;
         this.memory = memory;
         this.toolRegistry = toolRegistry;
@@ -45,6 +48,7 @@ public class AgentLoop {
         this.tokenTracker = tokenTracker;
         this.config = config;
         this.sessionManager = sessionManager;
+        this.contextCompressor = contextCompressor;
     }
 
     public AgentResponse run(String userMessage) {
@@ -64,9 +68,11 @@ public class AgentLoop {
             iteration++;
             log.info("[AgentLoop] ===== 第 {} 轮迭代 =====", iteration);
 
-            // 2a. 调用 LLM
-            List<ChatMessage> chatMessages = memory.toChatMessages();
-            log.info("[AgentLoop] 状态: THINKING -> 调用 LLM (历史消息: {} 条)", chatMessages.size());
+            // 2a. 调用 LLM（压缩上下文后）
+            List<Message> messages = memory.getMessages();
+            List<Message> compressed = contextCompressor.compressIfNeeded(messages);
+            List<ChatMessage> chatMessages = toChatMessages(compressed);
+            log.info("[AgentLoop] 状态: THINKING -> 调用 LLM (历史消息: {} 条, 压缩后: {} 条)", messages.size(), chatMessages.size());
             ChatResponse response = llmClient.chat(chatMessages, modelConfig, tools);
 
             if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
@@ -138,5 +144,18 @@ public class AgentLoop {
         turns.add(new TurnResult(AgentState.RESPONDING, maxIterMsg, List.of(), List.of(), iteration));
         sessionManager.autoSave();
         return new AgentResponse(maxIterMsg, turns, iteration, true);
+    }
+
+    private List<ChatMessage> toChatMessages(List<Message> messages) {
+        List<ChatMessage> result = new ArrayList<>();
+        for (Message msg : messages) {
+            switch (msg.role()) {
+                case SYSTEM -> result.add(new ChatMessage("system", msg.content()));
+                case USER -> result.add(ChatMessage.user(msg.content()));
+                case ASSISTANT -> result.add(ChatMessage.assistant(msg.content()));
+                case TOOL -> result.add(ChatMessage.user(msg.content()));
+            }
+        }
+        return result;
     }
 }

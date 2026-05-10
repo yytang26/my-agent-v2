@@ -7,8 +7,10 @@ import com.agent.llm.model.ChatResponse;
 import com.agent.llm.model.ContentBlock;
 import com.agent.llm.model.ModelConfig;
 import com.agent.llm.model.StreamChunk;
+import com.agent.context.ContextCompressor;
 import com.agent.memory.ConversationMemory;
 import com.agent.memory.Message;
+import com.agent.memory.MessageRole;
 import com.agent.session.SessionManager;
 import com.agent.cli.StreamRenderer;
 import com.agent.tool.ToolDefinition;
@@ -38,11 +40,13 @@ public class StreamingAgentLoop {
     private final TokenTracker tokenTracker;
     private final AgentLoopConfig config;
     private final SessionManager sessionManager;
+    private final ContextCompressor contextCompressor;
 
     public StreamingAgentLoop(LlmClient llmClient, ConversationMemory memory,
                               ToolRegistry toolRegistry, ToolExecutor toolExecutor,
                               StreamRenderer streamRenderer, TokenTracker tokenTracker,
-                              AgentLoopConfig config, SessionManager sessionManager) {
+                              AgentLoopConfig config, SessionManager sessionManager,
+                              ContextCompressor contextCompressor) {
         this.llmClient = llmClient;
         this.memory = memory;
         this.toolRegistry = toolRegistry;
@@ -51,6 +55,7 @@ public class StreamingAgentLoop {
         this.tokenTracker = tokenTracker;
         this.config = config;
         this.sessionManager = sessionManager;
+        this.contextCompressor = contextCompressor;
     }
 
     public AgentResponse runStreaming(String userMessage) {
@@ -70,8 +75,10 @@ public class StreamingAgentLoop {
             iteration++;
             log.info("[StreamingAgentLoop] ===== 第 {} 轮迭代 =====", iteration);
 
-            List<ChatMessage> chatMessages = memory.toChatMessages();
-            log.info("[StreamingAgentLoop] 状态: THINKING -> 调用 LLM 流式接口 (历史消息: {} 条)", chatMessages.size());
+            List<Message> messages = memory.getMessages();
+            List<Message> compressed = contextCompressor.compressIfNeeded(messages);
+            List<ChatMessage> chatMessages = toChatMessages(compressed);
+            log.info("[StreamingAgentLoop] 状态: THINKING -> 调用 LLM 流式接口 (历史消息: {} 条, 压缩后: {} 条)", messages.size(), chatMessages.size());
 
             Flux<StreamChunk> stream = llmClient.chatStream(chatMessages, modelConfig, tools);
 
@@ -168,5 +175,18 @@ public class StreamingAgentLoop {
         turns.add(new TurnResult(AgentState.RESPONDING, maxIterMsg, List.of(), List.of(), iteration));
         sessionManager.autoSave();
         return new AgentResponse(maxIterMsg, turns, iteration, true);
+    }
+
+    private List<ChatMessage> toChatMessages(List<Message> messages) {
+        List<ChatMessage> result = new ArrayList<>();
+        for (Message msg : messages) {
+            switch (msg.role()) {
+                case SYSTEM -> result.add(new ChatMessage("system", msg.content()));
+                case USER -> result.add(ChatMessage.user(msg.content()));
+                case ASSISTANT -> result.add(ChatMessage.assistant(msg.content()));
+                case TOOL -> result.add(ChatMessage.user(msg.content()));
+            }
+        }
+        return result;
     }
 }

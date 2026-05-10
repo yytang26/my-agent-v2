@@ -3,3 +3,11 @@ llm:
 
 permission:
   auto-allow: true
+
+agent:
+  context:
+    window-size: 200000
+    compression:
+      level1-threshold: 0.7
+      level2-threshold: 0.85
+      level3-threshold: 0.95
