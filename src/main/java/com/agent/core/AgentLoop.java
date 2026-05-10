@@ -1,11 +1,14 @@
 package com.agent.core;
 
 import com.agent.llm.LlmClient;
+import com.agent.llm.exception.ContextOverflowException;
 import com.agent.llm.model.ChatMessage;
 import com.agent.llm.model.ChatResponse;
 import com.agent.llm.model.ContentBlock;
 import com.agent.llm.model.ModelConfig;
 import com.agent.context.ContextCompressor;
+import com.agent.context.ContextOverflowHandler;
+import com.agent.context.PreflightTokenCheck;
 import com.agent.memory.ConversationMemory;
 import com.agent.memory.Message;
 import com.agent.memory.MessageRole;
@@ -36,11 +39,18 @@ public class AgentLoop {
     private final AgentLoopConfig config;
     private final SessionManager sessionManager;
     private final ContextCompressor contextCompressor;
+    private final ContextOverflowHandler contextOverflowHandler;
+    private final PreflightTokenCheck preflightTokenCheck;
+
+    @org.springframework.beans.factory.annotation.Value("${llm.context-window-size:200000}")
+    private int contextWindowSize = 200000;
 
     public AgentLoop(LlmClient llmClient, ConversationMemory memory,
                      ToolRegistry toolRegistry, ToolExecutor toolExecutor,
                      TokenTracker tokenTracker, AgentLoopConfig config,
-                     SessionManager sessionManager, ContextCompressor contextCompressor) {
+                     SessionManager sessionManager, ContextCompressor contextCompressor,
+                     ContextOverflowHandler contextOverflowHandler,
+                     PreflightTokenCheck preflightTokenCheck) {
         this.llmClient = llmClient;
         this.memory = memory;
         this.toolRegistry = toolRegistry;
@@ -49,6 +59,8 @@ public class AgentLoop {
         this.config = config;
         this.sessionManager = sessionManager;
         this.contextCompressor = contextCompressor;
+        this.contextOverflowHandler = contextOverflowHandler;
+        this.preflightTokenCheck = preflightTokenCheck;
     }
 
     public AgentResponse run(String userMessage) {
@@ -71,9 +83,37 @@ public class AgentLoop {
             // 2a. 调用 LLM（压缩上下文后）
             List<Message> messages = memory.getMessages();
             List<Message> compressed = contextCompressor.compressIfNeeded(messages);
+
+            // 预飞检查 + 自动压缩
+            if (preflightTokenCheck.willOverflow(compressed, contextWindowSize)) {
+                log.warn("[AgentLoop] 预检超限, 启动上下文恢复");
+                compressed = contextOverflowHandler.ensureFit(compressed, contextWindowSize);
+            }
+
             List<ChatMessage> chatMessages = toChatMessages(compressed);
             log.info("[AgentLoop] 状态: THINKING -> 调用 LLM (历史消息: {} 条, 压缩后: {} 条)", messages.size(), chatMessages.size());
-            ChatResponse response = llmClient.chat(chatMessages, modelConfig, tools);
+
+            ChatResponse response = null;
+            int overflowRetry = 0;
+            final int maxOverflowRetries = 2;
+
+            while (overflowRetry <= maxOverflowRetries) {
+                try {
+                    response = llmClient.chat(chatMessages, modelConfig, tools);
+                    break;
+                } catch (ContextOverflowException ex) {
+                    overflowRetry++;
+                    log.warn("[AgentLoop] 捕获上下文溢出异常 (重试 {}/{}): {}", overflowRetry, maxOverflowRetries, ex.getMessage());
+                    if (overflowRetry > maxOverflowRetries) {
+                        log.error("[AgentLoop] 上下文溢出恢复失败, 已达到最大重试次数");
+                        throw ex;
+                    }
+                    List<Message> recovered = contextOverflowHandler.handleOverflow(compressed, ex);
+                    chatMessages = toChatMessages(recovered);
+                    log.info("[AgentLoop] 使用压缩后消息重试 ({} 条 -> {} 条)", compressed.size(), recovered.size());
+                    compressed = recovered;
+                }
+            }
 
             if (response == null || response.getContent() == null || response.getContent().isEmpty()) {
                 log.warn("[AgentLoop] LLM 返回空响应");

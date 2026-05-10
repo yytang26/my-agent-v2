@@ -2,12 +2,15 @@ package com.agent.core;
 
 import com.agent.llm.ChunkAccumulator;
 import com.agent.llm.LlmClient;
+import com.agent.llm.exception.ContextOverflowException;
 import com.agent.llm.model.ChatMessage;
 import com.agent.llm.model.ChatResponse;
 import com.agent.llm.model.ContentBlock;
 import com.agent.llm.model.ModelConfig;
 import com.agent.llm.model.StreamChunk;
 import com.agent.context.ContextCompressor;
+import com.agent.context.ContextOverflowHandler;
+import com.agent.context.PreflightTokenCheck;
 import com.agent.memory.ConversationMemory;
 import com.agent.memory.Message;
 import com.agent.memory.MessageRole;
@@ -41,12 +44,19 @@ public class StreamingAgentLoop {
     private final AgentLoopConfig config;
     private final SessionManager sessionManager;
     private final ContextCompressor contextCompressor;
+    private final ContextOverflowHandler contextOverflowHandler;
+    private final PreflightTokenCheck preflightTokenCheck;
+
+    @org.springframework.beans.factory.annotation.Value("${llm.context-window-size:200000}")
+    private int contextWindowSize = 200000;
 
     public StreamingAgentLoop(LlmClient llmClient, ConversationMemory memory,
                               ToolRegistry toolRegistry, ToolExecutor toolExecutor,
                               StreamRenderer streamRenderer, TokenTracker tokenTracker,
                               AgentLoopConfig config, SessionManager sessionManager,
-                              ContextCompressor contextCompressor) {
+                              ContextCompressor contextCompressor,
+                              ContextOverflowHandler contextOverflowHandler,
+                              PreflightTokenCheck preflightTokenCheck) {
         this.llmClient = llmClient;
         this.memory = memory;
         this.toolRegistry = toolRegistry;
@@ -56,6 +66,8 @@ public class StreamingAgentLoop {
         this.config = config;
         this.sessionManager = sessionManager;
         this.contextCompressor = contextCompressor;
+        this.contextOverflowHandler = contextOverflowHandler;
+        this.preflightTokenCheck = preflightTokenCheck;
     }
 
     public AgentResponse runStreaming(String userMessage) {
@@ -77,45 +89,76 @@ public class StreamingAgentLoop {
 
             List<Message> messages = memory.getMessages();
             List<Message> compressed = contextCompressor.compressIfNeeded(messages);
+
+            // 预飞检查 + 自动压缩
+            if (preflightTokenCheck.willOverflow(compressed, contextWindowSize)) {
+                log.warn("[StreamingAgentLoop] 预检超限, 启动上下文恢复");
+                compressed = contextOverflowHandler.ensureFit(compressed, contextWindowSize);
+            }
+
             List<ChatMessage> chatMessages = toChatMessages(compressed);
             log.info("[StreamingAgentLoop] 状态: THINKING -> 调用 LLM 流式接口 (历史消息: {} 条, 压缩后: {} 条)", messages.size(), chatMessages.size());
 
-            Flux<StreamChunk> stream = llmClient.chatStream(chatMessages, modelConfig, tools);
-
-            ChunkAccumulator accumulator = new ChunkAccumulator();
+            final ChunkAccumulator[] accRef = new ChunkAccumulator[1];
             List<TurnResult.ToolCall> toolCalls = new ArrayList<>();
             List<ToolResult> toolResults = new ArrayList<>();
+            int overflowRetry = 0;
+            final int maxOverflowRetries = 2;
+            boolean streamSuccess = false;
 
-            // b. 消费流
-            stream.doOnNext(chunk -> {
-                if (chunk.isTextDelta()) {
-                    streamRenderer.renderChunk(chunk);
-                    accumulator.accumulate(chunk);
-                } else if (chunk.isToolUseStart()) {
-                    streamRenderer.renderToolStart(chunk.getToolName());
-                    accumulator.accumulate(chunk);
-                } else if (chunk.isToolInputDelta()) {
-                    accumulator.accumulate(chunk);
-                } else if (chunk.getType() == com.agent.llm.model.StreamEventType.CONTENT_BLOCK_STOP) {
-                    accumulator.accumulate(chunk);
-                } else if (chunk.getType() == com.agent.llm.model.StreamEventType.MESSAGE_START) {
-                    accumulator.accumulate(chunk);
-                } else if (chunk.getType() == com.agent.llm.model.StreamEventType.MESSAGE_DELTA) {
-                    accumulator.accumulate(chunk);
-                } else if (chunk.getType() == com.agent.llm.model.StreamEventType.MESSAGE_STOP) {
-                    accumulator.accumulate(chunk);
+            while (!streamSuccess && overflowRetry <= maxOverflowRetries) {
+                final ChunkAccumulator currentAcc = new ChunkAccumulator();
+                accRef[0] = currentAcc;
+                Flux<StreamChunk> stream = llmClient.chatStream(chatMessages, modelConfig, tools);
+
+                try {
+                    stream.doOnNext(chunk -> {
+                        if (chunk.isTextDelta()) {
+                            streamRenderer.renderChunk(chunk);
+                            currentAcc.accumulate(chunk);
+                        } else if (chunk.isToolUseStart()) {
+                            streamRenderer.renderToolStart(chunk.getToolName());
+                            currentAcc.accumulate(chunk);
+                        } else if (chunk.isToolInputDelta()) {
+                            currentAcc.accumulate(chunk);
+                        } else if (chunk.getType() == com.agent.llm.model.StreamEventType.CONTENT_BLOCK_STOP) {
+                            currentAcc.accumulate(chunk);
+                        } else if (chunk.getType() == com.agent.llm.model.StreamEventType.MESSAGE_START) {
+                            currentAcc.accumulate(chunk);
+                        } else if (chunk.getType() == com.agent.llm.model.StreamEventType.MESSAGE_DELTA) {
+                            currentAcc.accumulate(chunk);
+                        } else if (chunk.getType() == com.agent.llm.model.StreamEventType.MESSAGE_STOP) {
+                            currentAcc.accumulate(chunk);
+                        }
+                    }).onErrorResume(e -> {
+                        if (e instanceof ContextOverflowException) {
+                            return Flux.error(e);
+                        }
+                        log.error("[StreamingAgentLoop] 流式消费出错", e);
+                        return Flux.empty();
+                    }).then().block();
+                    streamSuccess = true;
+                } catch (ContextOverflowException ex) {
+                    overflowRetry++;
+                    log.warn("[StreamingAgentLoop] 捕获上下文溢出异常 (重试 {}/{}): {}", overflowRetry, maxOverflowRetries, ex.getMessage());
+                    if (overflowRetry > maxOverflowRetries) {
+                        log.error("[StreamingAgentLoop] 上下文溢出恢复失败, 已达到最大重试次数");
+                        throw ex;
+                    }
+                    List<Message> recovered = contextOverflowHandler.handleOverflow(compressed, ex);
+                    chatMessages = toChatMessages(recovered);
+                    log.info("[StreamingAgentLoop] 使用压缩后消息重试 ({} 条 -> {} 条)", compressed.size(), recovered.size());
+                    compressed = recovered;
                 }
-            }).onErrorResume(e -> {
-                log.error("[StreamingAgentLoop] 流式消费出错", e);
-                return Flux.empty();
-            }).then().block();
+            }
 
             streamRenderer.newLine();
 
             // c. 流结束后处理
-            ChatResponse response = accumulator.toResponse();
+            ChunkAccumulator accumulator = accRef[0];
+            ChatResponse response = accumulator != null ? accumulator.toResponse() : null;
 
-            if (accumulator.hasToolUse()) {
+            if (accumulator != null && accumulator.hasToolUse()) {
                 // 包含 tool_use
                 List<ContentBlock> toolUseBlocks = accumulator.getToolUseBlocks();
 

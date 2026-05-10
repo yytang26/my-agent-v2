@@ -2,12 +2,14 @@ package com.agent.llm.claude;
 
 import com.agent.llm.LlmClient;
 import com.agent.llm.exception.AuthenticationException;
+import com.agent.llm.exception.ContextOverflowException;
 import com.agent.llm.exception.LlmException;
 import com.agent.llm.exception.OverloadedException;
 import com.agent.llm.exception.RateLimitException;
 import com.agent.llm.model.ChatMessage;
 import com.agent.llm.model.ChatResponse;
 import com.agent.llm.model.ModelConfig;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,6 +82,9 @@ public class ClaudeClient implements LlmClient {
             logger.error("Claude API client error: status={}, body={}", status, bodyText);
             if (status == 401) {
                 throw new AuthenticationException("Claude API authentication failed: " + bodyText, status, PROVIDER);
+            } else if (status == 413 || isContextLengthExceeded(bodyText)) {
+                int[] tokens = parseContextLengthInfo(bodyText);
+                throw new ContextOverflowException("Claude API context length exceeded: " + bodyText, e, tokens[0], tokens[1]);
             } else if (status == 429) {
                 long retryAfter = parseRetryAfter(e);
                 throw new RateLimitException("Claude API rate limited: " + bodyText, status, PROVIDER, retryAfter);
@@ -99,6 +104,32 @@ public class ClaudeClient implements LlmClient {
             logger.error("Claude API request failed: {}", e.getMessage());
             throw new LlmException("Claude API request failed: " + e.getMessage(), e, 0, PROVIDER, true);
         }
+    }
+
+    private boolean isContextLengthExceeded(String bodyText) {
+        if (bodyText == null) {
+            return false;
+        }
+        return bodyText.contains("context_length_exceeded");
+    }
+
+    private int[] parseContextLengthInfo(String bodyText) {
+        int currentTokens = 0;
+        int maxTokens = 0;
+        try {
+            JsonNode root = objectMapper.readTree(bodyText);
+            if (root.has("error") && root.get("error").has("message")) {
+                String msg = root.get("error").get("message").asText();
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile("(\\d+)\\s+tokens?\\s+>(\\s+the maximum of)?\\s+(\\d+)");
+                java.util.regex.Matcher m = p.matcher(msg);
+                if (m.find()) {
+                    currentTokens = Integer.parseInt(m.group(1));
+                    maxTokens = Integer.parseInt(m.group(3));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return new int[]{currentTokens, maxTokens};
     }
 
     private long parseRetryAfter(HttpClientErrorException e) {

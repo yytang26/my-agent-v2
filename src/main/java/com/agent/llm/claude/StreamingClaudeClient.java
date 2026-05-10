@@ -2,6 +2,7 @@ package com.agent.llm.claude;
 
 import com.agent.llm.LlmClient;
 import com.agent.llm.exception.AuthenticationException;
+import com.agent.llm.exception.ContextOverflowException;
 import com.agent.llm.exception.LlmException;
 import com.agent.llm.exception.OverloadedException;
 import com.agent.llm.exception.RateLimitException;
@@ -170,6 +171,9 @@ public class StreamingClaudeClient implements LlmClient {
     private Throwable mapError(int status, String body) {
         if (status == 401) {
             return new AuthenticationException("Claude API authentication failed: " + body, status, PROVIDER);
+        } else if (status == 413 || isContextLengthExceeded(body)) {
+            int[] tokens = parseContextLengthInfo(body);
+            return new ContextOverflowException("Claude API context length exceeded: " + body, tokens[0], tokens[1]);
         } else if (status == 429) {
             return new RateLimitException("Claude API rate limited: " + body, status, PROVIDER, 0);
         } else if (status == 529) {
@@ -179,5 +183,31 @@ public class StreamingClaudeClient implements LlmClient {
         } else {
             return new LlmException("Claude API client error: " + body, null, status, PROVIDER, false);
         }
+    }
+
+    private boolean isContextLengthExceeded(String bodyText) {
+        if (bodyText == null) {
+            return false;
+        }
+        return bodyText.contains("context_length_exceeded");
+    }
+
+    private int[] parseContextLengthInfo(String bodyText) {
+        int currentTokens = 0;
+        int maxTokens = 0;
+        try {
+            JsonNode root = objectMapper.readTree(bodyText);
+            if (root.has("error") && root.get("error").has("message")) {
+                String msg = root.get("error").get("message").asText();
+                java.util.regex.Pattern p = java.util.regex.Pattern.compile("(\\d+)\\s+tokens?\\s+>(\\s+the maximum of)?\\s+(\\d+)");
+                java.util.regex.Matcher m = p.matcher(msg);
+                if (m.find()) {
+                    currentTokens = Integer.parseInt(m.group(1));
+                    maxTokens = Integer.parseInt(m.group(3));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return new int[]{currentTokens, maxTokens};
     }
 }
