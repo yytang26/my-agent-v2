@@ -46,29 +46,12 @@ public class ChatResponse {
         if (content == null || content.isEmpty()) {
             return null;
         }
-        return content.get(0).getText();
-    }
-
-    public static class ContentBlock {
-
-        private String type;
-        private String text;
-
-        public String getType() {
-            return type;
+        for (ContentBlock block : content) {
+            if ("text".equals(block.getType()) && block.getText() != null) {
+                return block.getText();
+            }
         }
-
-        public void setType(String type) {
-            this.type = type;
-        }
-
-        public String getText() {
-            return text;
-        }
-
-        public void setText(String text) {
-            this.text = text;
-        }
+        return null;
     }
 
     public static class Usage {
