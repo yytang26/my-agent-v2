@@ -1,0 +1,18 @@
+name: code-review
+description: "代码审查"
+template: |
+  请对以下代码进行审查，关注：
+  1. 代码质量
+  2. 潜在 bug
+  3. 性能问题
+  4. 可读性和可维护性
+  5. 安全漏洞
+
+  文件: file_path
+  代码:
+  ```
+  code_content
+  ```
+variables:
+  file_path: ""
+  code_content: ""

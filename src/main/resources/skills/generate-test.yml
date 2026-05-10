@@ -1,0 +1,22 @@
+name: generate-test
+description: "生成测试"
+template: |
+  请为以下代码生成单元测试：
+
+  文件: file_path
+  代码:
+  ```
+  code_content
+  ```
+
+  要求：
+  1. 使用 JUnit 5 框架
+  2. 覆盖主要逻辑路径
+  3. 包含边界条件测试
+  4. 测试命名清晰、可读
+  5. 提供必要的 setup 和 teardown
+
+  请只输出完整的测试代码，不需要额外解释。
+variables:
+  file_path: ""
+  code_content: ""

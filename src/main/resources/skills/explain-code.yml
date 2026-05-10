@@ -1,0 +1,19 @@
+name: explain-code
+description: "代码解释"
+template: |
+  请详细解释以下代码的逻辑和功能：
+
+  文件: file_path
+  代码:
+  ```
+  code_content
+  ```
+
+  请从以下几个方面进行解释：
+  1. 整体功能概述
+  2. 关键逻辑步骤
+  3. 重要方法和类的作用
+  4. 输入输出说明
+variables:
+  file_path: ""
+  code_content: ""

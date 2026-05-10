@@ -1,5 +1,7 @@
 package com.agent.cli;
 
+import com.agent.core.AgentLoop;
+import com.agent.core.AgentResponse;
 import com.agent.memory.ConversationMemory;
 import com.agent.mcp.PluginLoader;
 import com.agent.permission.PermissionManager;
@@ -13,15 +15,22 @@ import com.agent.routing.Intent;
 import com.agent.routing.RoutingConfig;
 import com.agent.session.SessionManager;
 import com.agent.session.SessionMetadata;
+import com.agent.template.CommandRegistry;
+import com.agent.template.PromptTemplate;
+import com.agent.template.SkillRegistry;
+import com.agent.template.TemplateRenderer;
 import com.agent.tool.ToolDefinition;
 import com.agent.tool.ToolRegistry;
 import com.agent.tracking.TokenTracker;
 import com.agent.tracking.UsageSummary;
 import org.springframework.stereotype.Component;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 @Component
@@ -43,6 +52,10 @@ public class CommandHandler {
     private final VectorStore vectorStore;
     private final com.agent.tool.builtin.RagTool ragTool;
     private final PluginLoader pluginLoader;
+    private final AgentLoop agentLoop;
+    private final SkillRegistry skillRegistry;
+    private final CommandRegistry commandRegistry;
+    private final TemplateRenderer templateRenderer;
 
     public CommandHandler(TokenTracker tokenTracker,
                           ConversationMemory conversationMemory,
@@ -55,7 +68,11 @@ public class CommandHandler {
                           AdvancedRagPipeline advancedRagPipeline,
                           VectorStore vectorStore,
                           com.agent.tool.builtin.RagTool ragTool,
-                          PluginLoader pluginLoader) {
+                          PluginLoader pluginLoader,
+                          AgentLoop agentLoop,
+                          SkillRegistry skillRegistry,
+                          CommandRegistry commandRegistry,
+                          TemplateRenderer templateRenderer) {
         this.tokenTracker = tokenTracker;
         this.conversationMemory = conversationMemory;
         this.toolRegistry = toolRegistry;
@@ -68,6 +85,10 @@ public class CommandHandler {
         this.vectorStore = vectorStore;
         this.ragTool = ragTool;
         this.pluginLoader = pluginLoader;
+        this.agentLoop = agentLoop;
+        this.skillRegistry = skillRegistry;
+        this.commandRegistry = commandRegistry;
+        this.templateRenderer = templateRenderer;
     }
 
     public boolean isCommand(String input) {
@@ -94,6 +115,11 @@ public class CommandHandler {
             case "/routing" -> handleRouting(parts.length > 1 ? parts[1].trim() : null);
             case "/rag" -> handleRag(parts.length > 1 ? parts[1].trim() : null);
             case "/plugins" -> handlePlugins(parts.length > 1 ? parts[1].trim() : null);
+            case "/review" -> handleTemplateCommand("code-review", parts.length > 1 ? parts[1].trim() : null);
+            case "/explain" -> handleTemplateCommand("explain-code", parts.length > 1 ? parts[1].trim() : null);
+            case "/test" -> handleTemplateCommand("generate-test", parts.length > 1 ? parts[1].trim() : null);
+            case "/skills" -> handleSkills();
+            case "/commands" -> handleCommands();
             default -> "未知命令: " + command + "\n输入 /help 查看可用命令。";
         };
     }
@@ -114,6 +140,11 @@ public class CommandHandler {
                   /routing     - 显示或开关意图路由
                   /rag         - RAG 知识库操作
                   /plugins     - 列出或重新加载 MCP 插件
+                  /review <file>  - 代码审查
+                  /explain <file> - 代码解释
+                  /test <file>    - 生成测试
+                  /skills         - 列出可用技能
+                  /commands       - 列出可用命令
                   /exit        - 退出程序
                 """;
     }
@@ -416,6 +447,62 @@ public class CommandHandler {
             }
         }
         sb.append("\n用法: /plugins reload - 重新加载插件");
+        return sb.toString().trim();
+    }
+
+    private String handleTemplateCommand(String skillName, String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            return "用法: /" + skillName.replace("-", " ") + " <file>";
+        }
+
+        Optional<PromptTemplate> skillOpt = skillRegistry.getSkill(skillName);
+        if (skillOpt.isEmpty()) {
+            return "未找到技能模板: " + skillName;
+        }
+
+        Path path = Path.of(filePath).toAbsolutePath().normalize();
+        if (!Files.exists(path)) {
+            return "Error: 文件不存在: " + filePath;
+        }
+
+        String content;
+        try {
+            content = Files.readString(path);
+        } catch (Exception e) {
+            return "Error: 读取文件失败: " + e.getMessage();
+        }
+
+        PromptTemplate template = skillOpt.get();
+        Map<String, String> values = Map.of(
+                "file_path", filePath,
+                "code_content", content
+        );
+        String prompt = templateRenderer.render(template.getTemplate(), values, template.getVariables());
+
+        AgentResponse response = agentLoop.run(prompt);
+        return response.getFinalMessage();
+    }
+
+    private String handleSkills() {
+        List<PromptTemplate> skills = skillRegistry.getSkills();
+        if (skills.isEmpty()) {
+            return "当前没有可用技能。";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("可用技能列表:\n");
+        for (PromptTemplate skill : skills) {
+            sb.append(String.format("  • %s - %s%n", skill.getName(), skill.getDescription()));
+        }
+        return sb.toString().trim();
+    }
+
+    private String handleCommands() {
+        List<String> commands = commandRegistry.listCommands();
+        StringBuilder sb = new StringBuilder();
+        sb.append("可用命令模板:\n");
+        for (String cmd : commands) {
+            sb.append(String.format("  %s%n", cmd));
+        }
         return sb.toString().trim();
     }
 }
