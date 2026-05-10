@@ -1,6 +1,7 @@
 package com.agent.cli;
 
 import com.agent.memory.ConversationMemory;
+import com.agent.mcp.PluginLoader;
 import com.agent.permission.PermissionManager;
 import com.agent.permission.PermissionPolicy;
 import com.agent.rag.Chunk;
@@ -41,6 +42,7 @@ public class CommandHandler {
     private final AdvancedRagPipeline advancedRagPipeline;
     private final VectorStore vectorStore;
     private final com.agent.tool.builtin.RagTool ragTool;
+    private final PluginLoader pluginLoader;
 
     public CommandHandler(TokenTracker tokenTracker,
                           ConversationMemory conversationMemory,
@@ -52,7 +54,8 @@ public class CommandHandler {
                           RagPipeline ragPipeline,
                           AdvancedRagPipeline advancedRagPipeline,
                           VectorStore vectorStore,
-                          com.agent.tool.builtin.RagTool ragTool) {
+                          com.agent.tool.builtin.RagTool ragTool,
+                          PluginLoader pluginLoader) {
         this.tokenTracker = tokenTracker;
         this.conversationMemory = conversationMemory;
         this.toolRegistry = toolRegistry;
@@ -64,6 +67,7 @@ public class CommandHandler {
         this.advancedRagPipeline = advancedRagPipeline;
         this.vectorStore = vectorStore;
         this.ragTool = ragTool;
+        this.pluginLoader = pluginLoader;
     }
 
     public boolean isCommand(String input) {
@@ -89,6 +93,7 @@ public class CommandHandler {
             case "/mode" -> handleMode(parts.length > 1 ? parts[1].trim() : null);
             case "/routing" -> handleRouting(parts.length > 1 ? parts[1].trim() : null);
             case "/rag" -> handleRag(parts.length > 1 ? parts[1].trim() : null);
+            case "/plugins" -> handlePlugins(parts.length > 1 ? parts[1].trim() : null);
             default -> "未知命令: " + command + "\n输入 /help 查看可用命令。";
         };
     }
@@ -108,6 +113,7 @@ public class CommandHandler {
                   /mode        - 显示或切换运行模式
                   /routing     - 显示或开关意图路由
                   /rag         - RAG 知识库操作
+                  /plugins     - 列出或重新加载 MCP 插件
                   /exit        - 退出程序
                 """;
     }
@@ -388,5 +394,28 @@ public class CommandHandler {
                 return "未知模式: " + mode + "\n可用模式: basic, advanced";
             }
         }
+    }
+
+    private String handlePlugins(String arg) {
+        if (arg != null && arg.equalsIgnoreCase("reload")) {
+            pluginLoader.reload();
+            return "MCP 插件已重新加载。";
+        }
+
+        Map<String, List<String>> plugins = pluginLoader.getLoadedPlugins();
+        if (plugins.isEmpty()) {
+            return "当前没有加载的 MCP 插件。\n用法: /plugins reload - 重新加载插件";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("已加载的 MCP 插件:\n");
+        for (Map.Entry<String, List<String>> entry : plugins.entrySet()) {
+            sb.append(String.format("  [%s] (%d 个工具)%n", entry.getKey(), entry.getValue().size()));
+            for (String toolName : entry.getValue()) {
+                sb.append(String.format("    - %s%n", toolName));
+            }
+        }
+        sb.append("\n用法: /plugins reload - 重新加载插件");
+        return sb.toString().trim();
     }
 }

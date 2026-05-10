@@ -9,6 +9,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 
 @Component
 public class ToolExecutor {
@@ -31,13 +32,29 @@ public class ToolExecutor {
         }
 
         Optional<ToolRegistry.ToolMethod> toolOpt = toolRegistry.getTool(toolName);
-        if (toolOpt.isEmpty()) {
-            String errorMsg = "Tool not found: " + toolName;
-            log.warn(errorMsg);
-            return ToolResult.error(toolUseId, errorMsg);
+        if (toolOpt.isPresent()) {
+            return executeAnnotatedTool(toolOpt.get(), toolName, toolUseId, arguments);
         }
 
-        ToolRegistry.ToolMethod toolMethod = toolOpt.get();
+        Optional<Function<Map<String, Object>, ToolResult>> dynamicOpt = toolRegistry.getDynamicExecutor(toolName);
+        if (dynamicOpt.isPresent()) {
+            try {
+                ToolResult result = dynamicOpt.get().apply(arguments);
+                log.info("Dynamic tool '{}' executed successfully. toolUseId={}", toolName, toolUseId);
+                return result;
+            } catch (Exception e) {
+                String errorMsg = "Dynamic tool execution failed: " + e.getMessage();
+                log.error(errorMsg, e);
+                return ToolResult.error(toolUseId, errorMsg);
+            }
+        }
+
+        String errorMsg = "Tool not found: " + toolName;
+        log.warn(errorMsg);
+        return ToolResult.error(toolUseId, errorMsg);
+    }
+
+    private ToolResult executeAnnotatedTool(ToolRegistry.ToolMethod toolMethod, String toolName, String toolUseId, Map<String, Object> arguments) {
         Method method = toolMethod.method();
         Object bean = toolMethod.beanInstance();
         Parameter[] parameters = method.getParameters();

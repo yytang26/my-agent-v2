@@ -23,6 +23,13 @@ agent:
       use-reranker: false
       bm25-weight: 1.0
       vector-weight: 1.0
+  mcp:
+    servers:
+      # 示例配置（默认为空列表）
+      # - name: "filesystem"
+      #   command: "npx"
+      #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+      #   transport-type: "stdio"
 
 llm:
   provider: claude  # claude | openai | mock

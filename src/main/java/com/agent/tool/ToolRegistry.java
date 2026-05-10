@@ -9,6 +9,7 @@ import jakarta.annotation.PostConstruct;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.*;
+import java.util.function.Function;
 
 @Component
 public class ToolRegistry {
@@ -17,6 +18,8 @@ public class ToolRegistry {
 
     private final ApplicationContext applicationContext;
     private final Map<String, ToolMethod> tools = new LinkedHashMap<>();
+    private final Map<String, ToolDefinition> dynamicToolDefinitions = new LinkedHashMap<>();
+    private final Map<String, Function<Map<String, Object>, ToolResult>> dynamicToolExecutors = new LinkedHashMap<>();
 
     public ToolRegistry(ApplicationContext applicationContext) {
         this.applicationContext = applicationContext;
@@ -99,10 +102,33 @@ public class ToolRegistry {
         return "string";
     }
 
+    public void registerDynamic(String name, ToolDefinition definition, Function<Map<String, Object>, ToolResult> executor) {
+        dynamicToolDefinitions.put(name, definition);
+        dynamicToolExecutors.put(name, executor);
+        log.info("Registered dynamic tool: {}", name);
+    }
+
+    public void unregisterDynamic(String name) {
+        dynamicToolDefinitions.remove(name);
+        dynamicToolExecutors.remove(name);
+        log.info("Unregistered dynamic tool: {}", name);
+    }
+
+    public Optional<Function<Map<String, Object>, ToolResult>> getDynamicExecutor(String name) {
+        return Optional.ofNullable(dynamicToolExecutors.get(name));
+    }
+
+    public boolean hasDynamicTool(String name) {
+        return dynamicToolDefinitions.containsKey(name);
+    }
+
     public List<ToolDefinition> getAllToolDefinitions() {
-        return tools.values().stream()
+        List<ToolDefinition> all = new ArrayList<>();
+        all.addAll(tools.values().stream()
                 .map(ToolMethod::definition)
-                .toList();
+                .toList());
+        all.addAll(dynamicToolDefinitions.values());
+        return all;
     }
 
     public Optional<ToolMethod> getTool(String name) {
