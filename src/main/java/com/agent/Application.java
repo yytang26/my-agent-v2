@@ -139,6 +139,35 @@ public class Application {
             }
             System.out.println("=====================================");
 
+            // === 代码工具演示 ===
+            System.out.println("\n========== 代码工具演示 ==========");
+
+            // 1. glob 列出所有 Java 文件
+            System.out.println("\n--- 1. glob (**/*.java) ---");
+            ToolResult globResult = toolExecutor.execute("glob", "demo-code-1",
+                    Map.of("pattern", "**/*.java"));
+            System.out.println(globResult.getContent());
+
+            // 2. grep 搜索 TODO
+            System.out.println("\n--- 2. grep (TODO) ---");
+            ToolResult grepTodoResult = toolExecutor.execute("grep", "demo-code-2",
+                    Map.of("pattern", "TODO"));
+            System.out.println(grepTodoResult.getContent());
+
+            // 3. grep 搜索 @Component
+            System.out.println("\n--- 3. grep (@Component) ---");
+            ToolResult grepComponentResult = toolExecutor.execute("grep", "demo-code-3",
+                    Map.of("pattern", "@Component"));
+            System.out.println(grepComponentResult.getContent());
+
+            // 4. bash 执行 mvn --version
+            System.out.println("\n--- 4. bash (mvn --version) ---");
+            ToolResult bashResult = toolExecutor.execute("bash", "demo-code-4",
+                    Map.of("command", "mvn --version"));
+            System.out.println(bashResult.getContent());
+
+            System.out.println("=====================================");
+
             // === Agent Loop 演示 1: 触发工具调用 ===
             memory.clear();
             memory.setSystemPrompt("你是一个有帮助的 AI 助手。");
