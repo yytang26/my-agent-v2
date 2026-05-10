@@ -4,6 +4,9 @@ agent:
   streaming: true
   loop:
     max-iterations: 10
+  react:
+    enabled: false
+    max-iterations: 10
   context:
     window-size: 200000
     compression:

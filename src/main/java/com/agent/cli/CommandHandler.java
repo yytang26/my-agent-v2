@@ -3,6 +3,7 @@ package com.agent.cli;
 import com.agent.memory.ConversationMemory;
 import com.agent.permission.PermissionManager;
 import com.agent.permission.PermissionPolicy;
+import com.agent.react.AgentMode;
 import com.agent.session.SessionManager;
 import com.agent.session.SessionMetadata;
 import com.agent.tool.ToolDefinition;
@@ -28,17 +29,20 @@ public class CommandHandler {
     private final ToolRegistry toolRegistry;
     private final PermissionManager permissionManager;
     private final SessionManager sessionManager;
+    private final AgentMode agentMode;
 
     public CommandHandler(TokenTracker tokenTracker,
                           ConversationMemory conversationMemory,
                           ToolRegistry toolRegistry,
                           PermissionManager permissionManager,
-                          SessionManager sessionManager) {
+                          SessionManager sessionManager,
+                          AgentMode agentMode) {
         this.tokenTracker = tokenTracker;
         this.conversationMemory = conversationMemory;
         this.toolRegistry = toolRegistry;
         this.permissionManager = permissionManager;
         this.sessionManager = sessionManager;
+        this.agentMode = agentMode;
     }
 
     public boolean isCommand(String input) {
@@ -61,6 +65,7 @@ public class CommandHandler {
             case "/sessions" -> handleSessions();
             case "/resume" -> handleResume(parts.length > 1 ? parts[1].trim() : null);
             case "/new" -> handleNew();
+            case "/mode" -> handleMode(parts.length > 1 ? parts[1].trim() : null);
             default -> "未知命令: " + command + "\n输入 /help 查看可用命令。";
         };
     }
@@ -77,6 +82,7 @@ public class CommandHandler {
                   /sessions    - 列出所有历史会话
                   /resume <id> - 恢复指定会话
                   /new         - 开始新会话
+                  /mode        - 显示或切换运行模式
                   /exit        - 退出程序
                 """;
     }
@@ -188,5 +194,33 @@ public class CommandHandler {
         conversationMemory.clear();
         var session = sessionManager.createNew();
         return "已创建新会话: " + session.getId();
+    }
+
+    private String handleMode(String mode) {
+        if (mode == null || mode.isBlank()) {
+            return "当前模式: " + agentMode.getCurrentMode() + "\n用法: /mode react | /mode native";
+        }
+        String lower = mode.toLowerCase();
+        switch (lower) {
+            case "react" -> {
+                if (agentMode.isReact()) {
+                    return "当前已经是 ReAct 模式。";
+                }
+                agentMode.setCurrentMode(AgentMode.REACT);
+                conversationMemory.clear();
+                return "已切换到 ReAct 模式。对话记忆已清空。";
+            }
+            case "native" -> {
+                if (agentMode.isNative()) {
+                    return "当前已经是原生 function calling 模式。";
+                }
+                agentMode.setCurrentMode(AgentMode.NATIVE);
+                conversationMemory.clear();
+                return "已切换到原生 function calling 模式。对话记忆已清空。";
+            }
+            default -> {
+                return "未知模式: " + mode + "\n可用模式: react, native";
+            }
+        }
     }
 }

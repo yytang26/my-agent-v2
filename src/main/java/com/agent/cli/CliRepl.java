@@ -4,6 +4,8 @@ import com.agent.core.AgentLoop;
 import com.agent.core.AgentResponse;
 import com.agent.core.StreamingAgentLoop;
 import com.agent.memory.ConversationMemory;
+import com.agent.react.AgentMode;
+import com.agent.react.ReActAgent;
 import com.agent.tracking.TokenTracker;
 import com.agent.tracking.UsageSummary;
 import org.slf4j.Logger;
@@ -24,6 +26,8 @@ public class CliRepl {
     private final ConversationMemory conversationMemory;
     private final TokenTracker tokenTracker;
     private final StreamingAgentLoop streamingAgentLoop;
+    private final ReActAgent reActAgent;
+    private final AgentMode agentMode;
 
     public CliRepl(InputReader inputReader,
                    CommandHandler commandHandler,
@@ -32,7 +36,9 @@ public class CliRepl {
                    Spinner spinner,
                    ConversationMemory conversationMemory,
                    TokenTracker tokenTracker,
-                   @Autowired(required = false) StreamingAgentLoop streamingAgentLoop) {
+                   @Autowired(required = false) StreamingAgentLoop streamingAgentLoop,
+                   @Autowired(required = false) ReActAgent reActAgent,
+                   AgentMode agentMode) {
         this.inputReader = inputReader;
         this.commandHandler = commandHandler;
         this.agentLoop = agentLoop;
@@ -41,12 +47,14 @@ public class CliRepl {
         this.conversationMemory = conversationMemory;
         this.tokenTracker = tokenTracker;
         this.streamingAgentLoop = streamingAgentLoop;
+        this.reActAgent = reActAgent;
+        this.agentMode = agentMode;
     }
 
     public void start() {
         printWelcome();
 
-        conversationMemory.setSystemPrompt("你是一个有帮助的 AI 编程助手，可以使用工具来帮助用户完成任务。");
+        initSystemPrompt();
 
         while (true) {
             String input = inputReader.readLine();
@@ -67,13 +75,19 @@ public class CliRepl {
                     break;
                 }
                 System.out.println(result);
+                // 切换模式后重新初始化 system prompt
+                initSystemPrompt();
                 continue;
             }
 
-            // 调用 AgentLoop（优先流式模式）
+            // 调用 Agent（根据模式选择）
             AgentResponse response;
             try {
-                if (streamingAgentLoop != null) {
+                if (agentMode.isReact() && reActAgent != null) {
+                    spinner.start();
+                    response = reActAgent.run(input);
+                    spinner.stop();
+                } else if (streamingAgentLoop != null) {
                     response = streamingAgentLoop.runStreaming(input);
                 } else {
                     spinner.start();
@@ -81,14 +95,14 @@ public class CliRepl {
                     spinner.stop();
                 }
             } catch (Exception e) {
-                log.error("AgentLoop 执行出错", e);
+                log.error("Agent 执行出错", e);
                 spinner.stop();
                 System.out.println("错误: " + e.getMessage());
                 continue;
             }
 
             // 流式模式下文字已实时输出，非流式模式需要渲染最终结果
-            if (streamingAgentLoop == null) {
+            if (streamingAgentLoop == null || agentMode.isReact()) {
                 String finalMessage = response.getFinalMessage();
                 if (finalMessage != null && !finalMessage.isEmpty()) {
                     String rendered = terminalRenderer.render(finalMessage);
@@ -98,6 +112,15 @@ public class CliRepl {
         }
 
         printFarewell();
+    }
+
+    private void initSystemPrompt() {
+        if (agentMode.isReact()) {
+            // ReAct 模式下由 ReActAgent 自行设置 system prompt
+            conversationMemory.setSystemPrompt("");
+        } else {
+            conversationMemory.setSystemPrompt("你是一个有帮助的 AI 编程助手，可以使用工具来帮助用户完成任务。");
+        }
     }
 
     private void printWelcome() {

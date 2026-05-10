@@ -11,3 +11,6 @@ agent:
       level1-threshold: 0.7
       level2-threshold: 0.85
       level3-threshold: 0.95
+  react:
+    enabled: false
+    max-iterations: 10
