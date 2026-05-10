@@ -1,2 +1,5 @@
 llm:
   provider: mock
+
+permission:
+  auto-allow: true

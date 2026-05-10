@@ -1,5 +1,6 @@
 package com.agent.tool;
 
+import com.agent.permission.PermissionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -15,12 +16,20 @@ public class ToolExecutor {
     private static final Logger log = LoggerFactory.getLogger(ToolExecutor.class);
 
     private final ToolRegistry toolRegistry;
+    private final PermissionManager permissionManager;
 
-    public ToolExecutor(ToolRegistry toolRegistry) {
+    public ToolExecutor(ToolRegistry toolRegistry, PermissionManager permissionManager) {
         this.toolRegistry = toolRegistry;
+        this.permissionManager = permissionManager;
     }
 
     public ToolResult execute(String toolName, String toolUseId, Map<String, Object> arguments) {
+        // 权限检查
+        if (!permissionManager.checkPermission(toolName, arguments)) {
+            log.warn("用户拒绝了工具执行: {}", toolName);
+            return ToolResult.error(toolUseId, "用户拒绝了该操作");
+        }
+
         Optional<ToolRegistry.ToolMethod> toolOpt = toolRegistry.getTool(toolName);
         if (toolOpt.isEmpty()) {
             String errorMsg = "Tool not found: " + toolName;

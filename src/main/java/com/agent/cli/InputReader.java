@@ -93,4 +93,19 @@ public class InputReader {
     public boolean isEof() {
         return eof;
     }
+
+    public Terminal getTerminal() {
+        return lineReader.getTerminal();
+    }
+
+    public String readLineRaw() {
+        try {
+            return lineReader.readLine();
+        } catch (EndOfFileException e) {
+            eof = true;
+            return null;
+        } catch (UserInterruptException e) {
+            return "";
+        }
+    }
 }
