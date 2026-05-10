@@ -14,6 +14,7 @@ import com.agent.resilience.RetryPolicy;
 import com.agent.tool.ToolDefinition;
 import com.agent.tool.ToolExecutor;
 import com.agent.tool.ToolRegistry;
+import com.agent.tool.ToolResult;
 import com.agent.tracking.TokenTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,7 +25,11 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.Environment;
 
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 @SpringBootApplication
 public class Application {
@@ -79,6 +84,60 @@ public class Application {
                 }
             }
             System.out.println("====================");
+
+            // === 文件系统工具演示 ===
+            System.out.println("\n========== 文件系统工具演示 ==========");
+
+            // 1. list_directory 列出项目根目录
+            System.out.println("\n--- 1. list_directory (根目录) ---");
+            ToolResult listResult = toolExecutor.execute("list_directory", "demo-1",
+                    Map.of("path", "."));
+            System.out.println(listResult.getContent());
+
+            // 2. read_file 读取 pom.xml 前10行
+            System.out.println("\n--- 2. read_file (pom.xml 前10行) ---");
+            Map<String, Object> readArgs = new HashMap<>();
+            readArgs.put("path", "pom.xml");
+            readArgs.put("start_line", 1);
+            readArgs.put("end_line", 10);
+            ToolResult readResult = toolExecutor.execute("read_file", "demo-2", readArgs);
+            System.out.println(readResult.getContent());
+
+            // 3. write_file 创建 test-output.txt
+            System.out.println("\n--- 3. write_file (test-output.txt) ---");
+            ToolResult writeResult = toolExecutor.execute("write_file", "demo-3",
+                    Map.of("path", "test-output.txt", "content", "Hello, Stage 09!\nThis is a test file.\n"));
+            System.out.println(writeResult.getContent());
+
+            // 4. edit_file 修改 test-output.txt
+            System.out.println("\n--- 4. edit_file (修改 test-output.txt) ---");
+            ToolResult editResult = toolExecutor.execute("edit_file", "demo-4",
+                    Map.of("path", "test-output.txt", "old_text", "Stage 09",
+                            "new_text", "File System Tools"));
+            System.out.println(editResult.getContent());
+
+            // 验证修改后的内容
+            System.out.println("\n--- 验证修改后的内容 ---");
+            ToolResult verifyResult = toolExecutor.execute("read_file", "demo-5",
+                    Map.of("path", "test-output.txt"));
+            System.out.println(verifyResult.getContent());
+
+            // 5. 尝试读取 /etc/passwd -> 验证被 PathValidator 拦截
+            System.out.println("\n--- 5. 路径安全验证 (/etc/passwd 应被拦截) ---");
+            ToolResult securityResult = toolExecutor.execute("read_file", "demo-6",
+                    Map.of("path", "/etc/passwd"));
+            System.out.println(securityResult.getContent());
+
+            // 清理演示生成的文件
+            System.out.println("\n--- 清理演示文件 ---");
+            Path testOutputPath = Path.of(System.getProperty("user.dir"), "test-output.txt");
+            try {
+                Files.deleteIfExists(testOutputPath);
+                System.out.println("Deleted: test-output.txt");
+            } catch (Exception e) {
+                System.out.println("Failed to delete test-output.txt: " + e.getMessage());
+            }
+            System.out.println("=====================================");
 
             // === Agent Loop 演示 1: 触发工具调用 ===
             memory.clear();

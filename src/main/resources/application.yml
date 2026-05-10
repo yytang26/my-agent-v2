@@ -1,3 +1,8 @@
+agent:
+  workspace-root: ${user.dir}
+  loop:
+    max-iterations: 10
+
 llm:
   provider: claude  # claude | openai | mock
 
