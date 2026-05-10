@@ -4,6 +4,8 @@ import com.agent.memory.ConversationMemory;
 import com.agent.permission.PermissionManager;
 import com.agent.permission.PermissionPolicy;
 import com.agent.react.AgentMode;
+import com.agent.routing.Intent;
+import com.agent.routing.RoutingConfig;
 import com.agent.session.SessionManager;
 import com.agent.session.SessionMetadata;
 import com.agent.tool.ToolDefinition;
@@ -30,19 +32,22 @@ public class CommandHandler {
     private final PermissionManager permissionManager;
     private final SessionManager sessionManager;
     private final AgentMode agentMode;
+    private final RoutingConfig routingConfig;
 
     public CommandHandler(TokenTracker tokenTracker,
                           ConversationMemory conversationMemory,
                           ToolRegistry toolRegistry,
                           PermissionManager permissionManager,
                           SessionManager sessionManager,
-                          AgentMode agentMode) {
+                          AgentMode agentMode,
+                          RoutingConfig routingConfig) {
         this.tokenTracker = tokenTracker;
         this.conversationMemory = conversationMemory;
         this.toolRegistry = toolRegistry;
         this.permissionManager = permissionManager;
         this.sessionManager = sessionManager;
         this.agentMode = agentMode;
+        this.routingConfig = routingConfig;
     }
 
     public boolean isCommand(String input) {
@@ -66,6 +71,7 @@ public class CommandHandler {
             case "/resume" -> handleResume(parts.length > 1 ? parts[1].trim() : null);
             case "/new" -> handleNew();
             case "/mode" -> handleMode(parts.length > 1 ? parts[1].trim() : null);
+            case "/routing" -> handleRouting(parts.length > 1 ? parts[1].trim() : null);
             default -> "未知命令: " + command + "\n输入 /help 查看可用命令。";
         };
     }
@@ -83,6 +89,7 @@ public class CommandHandler {
                   /resume <id> - 恢复指定会话
                   /new         - 开始新会话
                   /mode        - 显示或切换运行模式
+                  /routing     - 显示或开关意图路由
                   /exit        - 退出程序
                 """;
     }
@@ -220,6 +227,41 @@ public class CommandHandler {
             }
             default -> {
                 return "未知模式: " + mode + "\n可用模式: react, native";
+            }
+        }
+    }
+
+    private String handleRouting(String arg) {
+        if (arg == null || arg.isBlank()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("意图路由状态:\n");
+            sb.append("  启用状态: ").append(routingConfig.isEnabled() ? "已启用" : "已禁用").append("\n");
+            sb.append("  分类策略: ").append(routingConfig.isUseLlm() ? "LLM" : "规则匹配").append("\n");
+            sb.append("\n各意图对应的工具集:\n");
+            for (Intent intent : Intent.values()) {
+                sb.append(String.format("  %-10s -> %s%n", intent, routingConfig.getToolsForIntent(intent)));
+            }
+            sb.append("\n用法: /routing on | /routing off");
+            return sb.toString().trim();
+        }
+        String lower = arg.toLowerCase();
+        switch (lower) {
+            case "on", "enable", "true" -> {
+                if (routingConfig.isEnabled()) {
+                    return "意图路由已经是启用状态。";
+                }
+                routingConfig.setEnabled(true);
+                return "意图路由已启用。后续请求将按意图激活对应工具集。";
+            }
+            case "off", "disable", "false" -> {
+                if (!routingConfig.isEnabled()) {
+                    return "意图路由已经是禁用状态。";
+                }
+                routingConfig.setEnabled(false);
+                return "意图路由已禁用。所有工具将对每次请求可用。";
+            }
+            default -> {
+                return "未知参数: " + arg + "\n用法: /routing on | /routing off";
             }
         }
     }

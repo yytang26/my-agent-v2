@@ -13,6 +13,7 @@ import com.agent.memory.ConversationMemory;
 import com.agent.memory.Message;
 import com.agent.memory.MessageRole;
 import com.agent.session.SessionManager;
+import com.agent.routing.IntentRouter;
 import com.agent.tool.ToolDefinition;
 import com.agent.tool.ToolExecutor;
 import com.agent.tool.ToolRegistry;
@@ -41,6 +42,7 @@ public class AgentLoop {
     private final ContextCompressor contextCompressor;
     private final ContextOverflowHandler contextOverflowHandler;
     private final PreflightTokenCheck preflightTokenCheck;
+    private final IntentRouter intentRouter;
 
     @org.springframework.beans.factory.annotation.Value("${llm.context-window-size:200000}")
     private int contextWindowSize = 200000;
@@ -50,7 +52,8 @@ public class AgentLoop {
                      TokenTracker tokenTracker, AgentLoopConfig config,
                      SessionManager sessionManager, ContextCompressor contextCompressor,
                      ContextOverflowHandler contextOverflowHandler,
-                     PreflightTokenCheck preflightTokenCheck) {
+                     PreflightTokenCheck preflightTokenCheck,
+                     IntentRouter intentRouter) {
         this.llmClient = llmClient;
         this.memory = memory;
         this.toolRegistry = toolRegistry;
@@ -61,6 +64,7 @@ public class AgentLoop {
         this.contextCompressor = contextCompressor;
         this.contextOverflowHandler = contextOverflowHandler;
         this.preflightTokenCheck = preflightTokenCheck;
+        this.intentRouter = intentRouter;
     }
 
     public AgentResponse run(String userMessage) {
@@ -72,7 +76,7 @@ public class AgentLoop {
         List<TurnResult> turns = new ArrayList<>();
         int iteration = 0;
 
-        List<ToolDefinition> tools = toolRegistry.getAllToolDefinitions();
+        List<ToolDefinition> tools = intentRouter.route(userMessage);
         ModelConfig modelConfig = ModelConfig.builder().maxTokens(4096).build();
 
         // 2. 循环

@@ -7,6 +7,9 @@ agent:
   react:
     enabled: false
     max-iterations: 10
+  routing:
+    enabled: false
+    use-llm: false
   context:
     window-size: 200000
     compression:
