@@ -7,6 +7,7 @@ import com.agent.llm.model.ContentBlock;
 import com.agent.llm.model.ModelConfig;
 import com.agent.memory.ConversationMemory;
 import com.agent.memory.Message;
+import com.agent.session.SessionManager;
 import com.agent.tool.ToolDefinition;
 import com.agent.tool.ToolExecutor;
 import com.agent.tool.ToolRegistry;
@@ -31,16 +32,19 @@ public class AgentLoop {
     private final ToolExecutor toolExecutor;
     private final TokenTracker tokenTracker;
     private final AgentLoopConfig config;
+    private final SessionManager sessionManager;
 
     public AgentLoop(LlmClient llmClient, ConversationMemory memory,
                      ToolRegistry toolRegistry, ToolExecutor toolExecutor,
-                     TokenTracker tokenTracker, AgentLoopConfig config) {
+                     TokenTracker tokenTracker, AgentLoopConfig config,
+                     SessionManager sessionManager) {
         this.llmClient = llmClient;
         this.memory = memory;
         this.toolRegistry = toolRegistry;
         this.toolExecutor = toolExecutor;
         this.tokenTracker = tokenTracker;
         this.config = config;
+        this.sessionManager = sessionManager;
     }
 
     public AgentResponse run(String userMessage) {
@@ -123,6 +127,7 @@ public class AgentLoop {
                 turns.add(new TurnResult(AgentState.RESPONDING, finalText, List.of(), List.of(), iteration));
 
                 log.info("[AgentLoop] 循环结束，总迭代次数: {}", iteration);
+                sessionManager.autoSave();
                 return new AgentResponse(finalText, turns, iteration, false);
             }
         }
@@ -131,6 +136,7 @@ public class AgentLoop {
         log.warn("[AgentLoop] 达到最大迭代次数限制: {}", config.getMaxIterations());
         String maxIterMsg = "抱歉，处理您的请求所需的步骤过多，我已达到最大迭代限制。";
         turns.add(new TurnResult(AgentState.RESPONDING, maxIterMsg, List.of(), List.of(), iteration));
+        sessionManager.autoSave();
         return new AgentResponse(maxIterMsg, turns, iteration, true);
     }
 }

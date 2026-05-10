@@ -1,5 +1,6 @@
 agent:
   workspace-root: ${user.dir}
+  sessions-dir: ${user.home}/.my-agent/sessions
   loop:
     max-iterations: 10
 
