@@ -6,6 +6,7 @@ import com.agent.permission.PermissionPolicy;
 import com.agent.rag.Chunk;
 import com.agent.rag.RagPipeline;
 import com.agent.rag.VectorStore;
+import com.agent.rag.advanced.AdvancedRagPipeline;
 import com.agent.react.AgentMode;
 import com.agent.routing.Intent;
 import com.agent.routing.RoutingConfig;
@@ -37,7 +38,9 @@ public class CommandHandler {
     private final AgentMode agentMode;
     private final RoutingConfig routingConfig;
     private final RagPipeline ragPipeline;
+    private final AdvancedRagPipeline advancedRagPipeline;
     private final VectorStore vectorStore;
+    private final com.agent.tool.builtin.RagTool ragTool;
 
     public CommandHandler(TokenTracker tokenTracker,
                           ConversationMemory conversationMemory,
@@ -47,7 +50,9 @@ public class CommandHandler {
                           AgentMode agentMode,
                           RoutingConfig routingConfig,
                           RagPipeline ragPipeline,
-                          VectorStore vectorStore) {
+                          AdvancedRagPipeline advancedRagPipeline,
+                          VectorStore vectorStore,
+                          com.agent.tool.builtin.RagTool ragTool) {
         this.tokenTracker = tokenTracker;
         this.conversationMemory = conversationMemory;
         this.toolRegistry = toolRegistry;
@@ -56,7 +61,9 @@ public class CommandHandler {
         this.agentMode = agentMode;
         this.routingConfig = routingConfig;
         this.ragPipeline = ragPipeline;
+        this.advancedRagPipeline = advancedRagPipeline;
         this.vectorStore = vectorStore;
+        this.ragTool = ragTool;
     }
 
     public boolean isCommand(String input) {
@@ -284,6 +291,7 @@ public class CommandHandler {
                       /rag index <path> [pattern]  - 索引文件或目录
                       /rag search <query>          - 搜索知识库
                       /rag status                  - 显示索引状态
+                      /rag mode <basic|advanced>   - 切换 RAG 模式
                     """;
         }
 
@@ -295,7 +303,8 @@ public class CommandHandler {
             case "index" -> handleRagIndex(rest);
             case "search" -> handleRagSearch(rest);
             case "status" -> handleRagStatus();
-            default -> "未知子命令: " + subCommand + "\n用法: /rag index <path> | /rag search <query> | /rag status";
+            case "mode" -> handleRagMode(rest);
+            default -> "未知子命令: " + subCommand + "\n用法: /rag index <path> | /rag search <query> | /rag status | /rag mode <basic|advanced>";
         };
     }
 
@@ -351,6 +360,33 @@ public class CommandHandler {
 
     private String handleRagStatus() {
         int size = vectorStore.size();
-        return "知识库状态:\n  已索引 chunk 数量: " + size;
+        String mode = ragTool.getMode();
+        return "知识库状态:\n  已索引 chunk 数量: " + size + "\n  当前 RAG 模式: " + mode;
+    }
+
+    private String handleRagMode(String mode) {
+        if (mode == null || mode.isBlank()) {
+            return "当前 RAG 模式: " + ragTool.getMode() + "\n用法: /rag mode basic | /rag mode advanced";
+        }
+        String lower = mode.toLowerCase();
+        switch (lower) {
+            case "basic" -> {
+                if ("basic".equalsIgnoreCase(ragTool.getMode())) {
+                    return "当前已经是 basic 模式。";
+                }
+                ragTool.setMode("basic");
+                return "已切换到 basic RAG 模式。";
+            }
+            case "advanced" -> {
+                if ("advanced".equalsIgnoreCase(ragTool.getMode())) {
+                    return "当前已经是 advanced 模式。";
+                }
+                ragTool.setMode("advanced");
+                return "已切换到 advanced RAG 模式（多路召回 + RRF 融合）。";
+            }
+            default -> {
+                return "未知模式: " + mode + "\n可用模式: basic, advanced";
+            }
+        }
     }
 }

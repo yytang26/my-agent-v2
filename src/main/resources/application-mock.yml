@@ -17,3 +17,10 @@ agent:
   routing:
     enabled: false
     use-llm: false
+  rag:
+    advanced:
+      enabled: true
+      use-hyde: true
+      use-reranker: false
+      bm25-weight: 1.0
+      vector-weight: 1.0

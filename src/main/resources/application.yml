@@ -16,6 +16,13 @@ agent:
       level1-threshold: 0.7
       level2-threshold: 0.85
       level3-threshold: 0.95
+  rag:
+    advanced:
+      enabled: true
+      use-hyde: true
+      use-reranker: false
+      bm25-weight: 1.0
+      vector-weight: 1.0
 
 llm:
   provider: claude  # claude | openai | mock
