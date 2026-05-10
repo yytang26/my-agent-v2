@@ -3,6 +3,9 @@ package com.agent.cli;
 import com.agent.memory.ConversationMemory;
 import com.agent.permission.PermissionManager;
 import com.agent.permission.PermissionPolicy;
+import com.agent.rag.Chunk;
+import com.agent.rag.RagPipeline;
+import com.agent.rag.VectorStore;
 import com.agent.react.AgentMode;
 import com.agent.routing.Intent;
 import com.agent.routing.RoutingConfig;
@@ -33,6 +36,8 @@ public class CommandHandler {
     private final SessionManager sessionManager;
     private final AgentMode agentMode;
     private final RoutingConfig routingConfig;
+    private final RagPipeline ragPipeline;
+    private final VectorStore vectorStore;
 
     public CommandHandler(TokenTracker tokenTracker,
                           ConversationMemory conversationMemory,
@@ -40,7 +45,9 @@ public class CommandHandler {
                           PermissionManager permissionManager,
                           SessionManager sessionManager,
                           AgentMode agentMode,
-                          RoutingConfig routingConfig) {
+                          RoutingConfig routingConfig,
+                          RagPipeline ragPipeline,
+                          VectorStore vectorStore) {
         this.tokenTracker = tokenTracker;
         this.conversationMemory = conversationMemory;
         this.toolRegistry = toolRegistry;
@@ -48,6 +55,8 @@ public class CommandHandler {
         this.sessionManager = sessionManager;
         this.agentMode = agentMode;
         this.routingConfig = routingConfig;
+        this.ragPipeline = ragPipeline;
+        this.vectorStore = vectorStore;
     }
 
     public boolean isCommand(String input) {
@@ -72,6 +81,7 @@ public class CommandHandler {
             case "/new" -> handleNew();
             case "/mode" -> handleMode(parts.length > 1 ? parts[1].trim() : null);
             case "/routing" -> handleRouting(parts.length > 1 ? parts[1].trim() : null);
+            case "/rag" -> handleRag(parts.length > 1 ? parts[1].trim() : null);
             default -> "未知命令: " + command + "\n输入 /help 查看可用命令。";
         };
     }
@@ -90,6 +100,7 @@ public class CommandHandler {
                   /new         - 开始新会话
                   /mode        - 显示或切换运行模式
                   /routing     - 显示或开关意图路由
+                  /rag         - RAG 知识库操作
                   /exit        - 退出程序
                 """;
     }
@@ -264,5 +275,82 @@ public class CommandHandler {
                 return "未知参数: " + arg + "\n用法: /routing on | /routing off";
             }
         }
+    }
+
+    private String handleRag(String args) {
+        if (args == null || args.isBlank()) {
+            return """
+                    RAG 知识库操作:
+                      /rag index <path> [pattern]  - 索引文件或目录
+                      /rag search <query>          - 搜索知识库
+                      /rag status                  - 显示索引状态
+                    """;
+        }
+
+        String[] parts = args.split("\\s+", 2);
+        String subCommand = parts[0];
+        String rest = parts.length > 1 ? parts[1].trim() : null;
+
+        return switch (subCommand) {
+            case "index" -> handleRagIndex(rest);
+            case "search" -> handleRagSearch(rest);
+            case "status" -> handleRagStatus();
+            default -> "未知子命令: " + subCommand + "\n用法: /rag index <path> | /rag search <query> | /rag status";
+        };
+    }
+
+    private String handleRagIndex(String rest) {
+        if (rest == null || rest.isBlank()) {
+            return "用法: /rag index <path> [pattern]";
+        }
+
+        String[] parts = rest.split("\\s+", 2);
+        String path = parts[0];
+        String pattern = parts.length > 1 ? parts[1].trim() : null;
+
+        try {
+            java.nio.file.Path filePath = java.nio.file.Path.of(path).toAbsolutePath().normalize();
+            if (!java.nio.file.Files.exists(filePath)) {
+                return "Error: 路径不存在: " + path;
+            }
+
+            if (java.nio.file.Files.isDirectory(filePath)) {
+                ragPipeline.indexDirectory(path, pattern);
+                return "已索引目录: " + path + (pattern != null ? " (模式: " + pattern + ")" : "");
+            } else {
+                ragPipeline.indexFile(path);
+                return "已索引文件: " + path;
+            }
+        } catch (Exception e) {
+            return "索引失败: " + e.getMessage();
+        }
+    }
+
+    private String handleRagSearch(String query) {
+        if (query == null || query.isBlank()) {
+            return "用法: /rag search <query>";
+        }
+
+        List<Chunk> chunks = ragPipeline.retrieve(query, 5);
+        if (chunks.isEmpty()) {
+            return "未找到相关内容。";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("搜索结果 (共 ").append(chunks.size()).append(" 条):\n\n");
+        for (int i = 0; i < chunks.size(); i++) {
+            Chunk chunk = chunks.get(i);
+            sb.append(i + 1).append(". ");
+            sb.append("[").append(chunk.getSourceFile());
+            sb.append(" 行").append(chunk.getStartLine());
+            sb.append("-").append(chunk.getEndLine()).append("]\n");
+            sb.append(chunk.getContent()).append("\n\n");
+        }
+        return sb.toString().trim();
+    }
+
+    private String handleRagStatus() {
+        int size = vectorStore.size();
+        return "知识库状态:\n  已索引 chunk 数量: " + size;
     }
 }
