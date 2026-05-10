@@ -2,10 +2,11 @@ package com.agent;
 
 import com.agent.config.AgentConfig;
 import com.agent.config.ConfigManager;
+import com.agent.core.AgentLoop;
+import com.agent.core.AgentResponse;
+import com.agent.core.AgentState;
+import com.agent.core.TurnResult;
 import com.agent.llm.LlmClient;
-import com.agent.llm.model.ChatMessage;
-import com.agent.llm.model.ChatResponse;
-import com.agent.llm.model.ModelConfig;
 import com.agent.memory.ConversationMemory;
 import com.agent.memory.Message;
 import com.agent.resilience.RateLimiter;
@@ -13,7 +14,6 @@ import com.agent.resilience.RetryPolicy;
 import com.agent.tool.ToolDefinition;
 import com.agent.tool.ToolExecutor;
 import com.agent.tool.ToolRegistry;
-import com.agent.tool.ToolResult;
 import com.agent.tracking.TokenTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +25,6 @@ import org.springframework.core.env.Environment;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 @SpringBootApplication
 public class Application {
@@ -39,7 +38,8 @@ public class Application {
     @Bean
     public CommandLineRunner run(LlmClient llmClient, ConfigManager configManager, RateLimiter rateLimiter,
                                  TokenTracker tokenTracker, ConversationMemory memory, Environment env,
-                                 ToolRegistry toolRegistry, ToolExecutor toolExecutor) {
+                                 ToolRegistry toolRegistry, ToolExecutor toolExecutor,
+                                 AgentLoop agentLoop) {
         return args -> {
             configManager.printConfigSources();
             AgentConfig config = configManager.getConfig();
@@ -80,42 +80,27 @@ public class Application {
             }
             System.out.println("====================");
 
-            System.out.println("\n=== Tool 手动调用演示 ===");
-            ToolResult result = toolExecutor.execute("get_current_time", "test-id-001",
-                    Map.of("timezone", "Asia/Shanghai"));
-            System.out.println("工具执行结果: " + result);
-            System.out.println("====================");
-
+            // === Agent Loop 演示 1: 触发工具调用 ===
+            memory.clear();
             memory.setSystemPrompt("你是一个有帮助的 AI 助手。");
+            String prompt1 = "现在几点了？";
+            System.out.println("\n========== Agent Loop 演示 1: 工具调用 ==========");
+            System.out.println("用户: " + prompt1);
+            System.out.println("------------------------------------------------");
 
-            String[] userPrompts = {
-                    "我叫小明",
-                    "我喜欢Java",
-                    "我叫什么名字？",
-                    "我喜欢什么编程语言？",
-                    "目前对话用了多少token？",
-                    "现在几点了？"
-            };
+            AgentResponse response1 = agentLoop.run(prompt1);
+            printAgentResponse(response1);
 
-            ModelConfig modelConfig = ModelConfig.builder().maxTokens(1024).build();
+            // === Agent Loop 演示 2: 普通问题（直接文本回复） ===
+            memory.clear();
+            memory.setSystemPrompt("你是一个有帮助的 AI 助手。");
+            String prompt2 = "你好";
+            System.out.println("\n========== Agent Loop 演示 2: 普通问题 ==========");
+            System.out.println("用户: " + prompt2);
+            System.out.println("------------------------------------------------");
 
-            for (int i = 0; i < userPrompts.length; i++) {
-                String prompt = userPrompts[i];
-                System.out.println("\n=== 第 " + (i + 1) + " 轮对话 ===");
-                System.out.println("用户: " + prompt);
-
-                memory.addMessage(Message.user(prompt));
-
-                List<ChatMessage> chatMessages = memory.toChatMessages();
-                ChatResponse response = llmClient.chat(chatMessages, modelConfig);
-                String reply = response != null ? response.getFirstTextContent() : "(无回复)";
-                if (reply == null) {
-                    reply = "(助手返回了非文本内容)";
-                }
-
-                System.out.println("助手: " + reply);
-                memory.addMessage(Message.assistant(reply));
-            }
+            AgentResponse response2 = agentLoop.run(prompt2);
+            printAgentResponse(response2);
 
             System.out.println("\n=== 对话记忆统计 ===");
             System.out.println("消息数量: " + memory.size());
@@ -126,5 +111,29 @@ public class Application {
             System.out.println(tokenTracker.getSummary());
             System.out.println("====================");
         };
+    }
+
+    private void printAgentResponse(AgentResponse response) {
+        System.out.println("\n--- 每轮状态变化 ---");
+        for (TurnResult turn : response.getTurns()) {
+            System.out.println("  第 " + turn.getIteration() + " 轮: " + turn.getState());
+            if (!turn.getToolCalls().isEmpty()) {
+                System.out.println("    工具调用:");
+                for (TurnResult.ToolCall tc : turn.getToolCalls()) {
+                    System.out.println("      - " + tc.name() + " (id=" + tc.id() + ")");
+                }
+            }
+            if (!turn.getToolResults().isEmpty()) {
+                System.out.println("    工具结果:");
+                for (com.agent.tool.ToolResult tr : turn.getToolResults()) {
+                    System.out.println("      - " + tr.getToolUseId() + ": " + tr.getContent());
+                }
+            }
+        }
+        System.out.println("\n--- 最终结果 ---");
+        System.out.println("助手: " + response.getFinalMessage());
+        System.out.println("总迭代次数: " + response.getTotalIterations());
+        System.out.println("是否达到最大迭代限制: " + response.isReachedMaxIterations());
+        System.out.println("================================================");
     }
 }

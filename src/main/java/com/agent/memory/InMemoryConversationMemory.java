@@ -11,6 +11,7 @@ import java.util.List;
 public class InMemoryConversationMemory implements ConversationMemory {
 
     private final List<Message> messages = new ArrayList<>();
+    private final List<ChatMessage> chatMessages = new ArrayList<>();
     private String systemPrompt = null;
 
     @Override
@@ -19,6 +20,21 @@ public class InMemoryConversationMemory implements ConversationMemory {
             throw new IllegalArgumentException("message cannot be null");
         }
         messages.add(message);
+        chatMessages.add(new ChatMessage(message.role().name().toLowerCase(), message.content()));
+    }
+
+    @Override
+    public synchronized void addChatMessage(ChatMessage chatMessage) {
+        if (chatMessage == null) {
+            throw new IllegalArgumentException("chatMessage cannot be null");
+        }
+        chatMessages.add(chatMessage);
+        String text = chatMessage.getFirstTextContent();
+        if (text == null) {
+            text = "";
+        }
+        String role = chatMessage.getRole() != null ? chatMessage.getRole() : "user";
+        messages.add(new Message(MessageRole.valueOf(role.toUpperCase()), text, System.currentTimeMillis()));
     }
 
     @Override
@@ -51,6 +67,7 @@ public class InMemoryConversationMemory implements ConversationMemory {
     @Override
     public synchronized void clear() {
         messages.clear();
+        chatMessages.clear();
         systemPrompt = null;
     }
 
@@ -65,9 +82,8 @@ public class InMemoryConversationMemory implements ConversationMemory {
         if (systemPrompt != null) {
             result.add(new ChatMessage("system", systemPrompt));
         }
-        for (Message msg : messages) {
-            String roleName = msg.role().name().toLowerCase();
-            result.add(new ChatMessage(roleName, msg.content()));
+        for (ChatMessage cm : chatMessages) {
+            result.add(cm);
         }
         return result;
     }

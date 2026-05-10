@@ -1,6 +1,7 @@
 package com.agent.llm.model;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.ArrayList;
 import java.util.List;
 
 public class ChatResponse {
@@ -52,6 +53,35 @@ public class ChatResponse {
             }
         }
         return null;
+    }
+
+    public List<ContentBlock> getContentBlocks() {
+        return content;
+    }
+
+    public boolean hasToolUse() {
+        if (content == null || content.isEmpty()) {
+            return false;
+        }
+        for (ContentBlock block : content) {
+            if ("tool_use".equals(block.getType())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public List<ContentBlock> getToolUseBlocks() {
+        if (content == null || content.isEmpty()) {
+            return List.of();
+        }
+        List<ContentBlock> toolUseBlocks = new ArrayList<>();
+        for (ContentBlock block : content) {
+            if ("tool_use".equals(block.getType())) {
+                toolUseBlocks.add(block);
+            }
+        }
+        return toolUseBlocks;
     }
 
     public static class Usage {

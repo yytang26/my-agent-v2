@@ -8,6 +8,8 @@ public interface ConversationMemory {
 
     void addMessage(Message message);
 
+    void addChatMessage(ChatMessage chatMessage);
+
     List<Message> getMessages();
 
     void setSystemPrompt(String prompt);
