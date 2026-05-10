@@ -5,6 +5,7 @@ import com.agent.config.ConfigManager;
 import com.agent.llm.LlmClient;
 import com.agent.resilience.RateLimiter;
 import com.agent.resilience.RetryPolicy;
+import com.agent.tracking.TokenTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
@@ -25,7 +26,8 @@ public class Application {
     }
 
     @Bean
-    public CommandLineRunner run(LlmClient llmClient, ConfigManager configManager, RateLimiter rateLimiter, Environment env) {
+    public CommandLineRunner run(LlmClient llmClient, ConfigManager configManager, RateLimiter rateLimiter,
+                                 TokenTracker tokenTracker, Environment env) {
         return args -> {
             configManager.printConfigSources();
             AgentConfig config = configManager.getConfig();
@@ -52,11 +54,24 @@ public class Application {
                 System.out.println("====================");
             }
 
-            String prompt = "你好，请用一句话介绍你自己";
-            String response = llmClient.ask(prompt);
-            System.out.println("=== LLM 回复 ===");
-            System.out.println(response);
-            System.out.println("================");
+            String[] prompts = {
+                    "你好，请用一句话介绍你自己",
+                    "请解释一下什么是 Spring Boot",
+                    "用中文讲一个简短的笑话"
+            };
+
+            for (String prompt : prompts) {
+                System.out.println("=== 请求 ===");
+                System.out.println("Prompt: " + prompt);
+                String response = llmClient.ask(prompt);
+                System.out.println("=== LLM 回复 ===");
+                System.out.println(response);
+                System.out.println("================");
+            }
+
+            System.out.println("=== Token 使用统计 ===");
+            System.out.println(tokenTracker.getSummary());
+            System.out.println("====================");
         };
     }
 }

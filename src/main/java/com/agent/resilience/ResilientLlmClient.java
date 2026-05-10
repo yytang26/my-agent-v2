@@ -4,6 +4,7 @@ import com.agent.llm.LlmClient;
 import com.agent.llm.model.ChatMessage;
 import com.agent.llm.model.ChatResponse;
 import com.agent.llm.model.ModelConfig;
+import com.agent.tracking.TokenTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,6 +25,7 @@ public class ResilientLlmClient implements LlmClient {
     private final RateLimiter rateLimiter;
     private final FallbackChain fallbackChain;
     private final RetryPolicy defaultRetryPolicy;
+    private final TokenTracker tokenTracker;
 
     @Value("${resilience.retry.enabled:true}")
     private boolean retryEnabled;
@@ -33,11 +35,13 @@ public class ResilientLlmClient implements LlmClient {
 
     public ResilientLlmClient(RetryExecutor retryExecutor,
                               RateLimiter rateLimiter,
-                              FallbackChain fallbackChain) {
+                              FallbackChain fallbackChain,
+                              TokenTracker tokenTracker) {
         this.retryExecutor = retryExecutor;
         this.rateLimiter = rateLimiter;
         this.fallbackChain = fallbackChain;
         this.defaultRetryPolicy = RetryPolicy.builder().build();
+        this.tokenTracker = tokenTracker;
     }
 
     @Override
@@ -46,13 +50,25 @@ public class ResilientLlmClient implements LlmClient {
             rateLimiter.acquire();
         }
 
+        ChatResponse response;
         if (retryEnabled) {
-            return retryExecutor.executeWithRetry(
+            response = retryExecutor.executeWithRetry(
                     () -> fallbackChain.execute(messages, config),
                     defaultRetryPolicy
             );
         } else {
-            return fallbackChain.execute(messages, config);
+            response = fallbackChain.execute(messages, config);
         }
+
+        if (tokenTracker != null && response != null && response.getUsage() != null) {
+            String model = response.getModel() != null ? response.getModel() : config.getName();
+            tokenTracker.recordUsage(
+                    model != null ? model : "unknown",
+                    response.getUsage().getInputTokens(),
+                    response.getUsage().getOutputTokens()
+            );
+        }
+
+        return response;
     }
 }

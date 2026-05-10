@@ -4,6 +4,7 @@ import com.agent.llm.LlmClient;
 import com.agent.llm.model.ChatMessage;
 import com.agent.llm.model.ChatResponse;
 import com.agent.llm.model.ModelConfig;
+import com.agent.tracking.TokenTracker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;
@@ -16,6 +17,12 @@ import java.util.List;
 public class MockLlmClient implements LlmClient {
 
     private static final Logger log = LoggerFactory.getLogger(MockLlmClient.class);
+
+    private final TokenTracker tokenTracker;
+
+    public MockLlmClient(TokenTracker tokenTracker) {
+        this.tokenTracker = tokenTracker;
+    }
 
     @Override
     public ChatResponse chat(List<ChatMessage> messages, ModelConfig config) {
@@ -43,6 +50,14 @@ public class MockLlmClient implements LlmClient {
         usage.setInputTokens(messageCount * 10);
         usage.setOutputTokens(text.length());
         response.setUsage(usage);
+
+        if (tokenTracker != null && response.getUsage() != null) {
+            tokenTracker.recordUsage(
+                    response.getModel(),
+                    response.getUsage().getInputTokens(),
+                    response.getUsage().getOutputTokens()
+            );
+        }
 
         return response;
     }
