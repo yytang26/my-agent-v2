@@ -1,7 +1,7 @@
 package com.agent.tool.builtin;
 
 import com.agent.planner.TaskDAG;
-import com.agent.planner.TaskExecutor;
+import com.agent.planner.PlanTaskExecutor;
 import com.agent.planner.TaskPlanner;
 import com.agent.tool.Tool;
 import com.agent.tool.ToolParam;
@@ -18,11 +18,11 @@ public class PlannerTool {
     private static final Logger log = LoggerFactory.getLogger(PlannerTool.class);
 
     private final TaskPlanner taskPlanner;
-    private final TaskExecutor taskExecutor;
+    private final PlanTaskExecutor planTaskExecutor;
 
-    public PlannerTool(TaskPlanner taskPlanner, TaskExecutor taskExecutor) {
+    public PlannerTool(TaskPlanner taskPlanner, PlanTaskExecutor planTaskExecutor) {
         this.taskPlanner = taskPlanner;
-        this.taskExecutor = taskExecutor;
+        this.planTaskExecutor = planTaskExecutor;
     }
 
     @Tool(name = "plan_task", description = "将复杂任务分解为子任务并执行")
@@ -36,7 +36,7 @@ public class PlannerTool {
         log.info("[PlannerTool] 任务分解完成，共 {} 个子任务", dag.getTasks().size());
 
         // 2. 执行 DAG
-        TaskDAG resultDag = taskExecutor.execute(dag);
+        TaskDAG resultDag = planTaskExecutor.execute(dag);
         log.info("[PlannerTool] DAG 执行完成");
 
         // 3. 汇总结果

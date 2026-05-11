@@ -18,14 +18,14 @@ import java.util.stream.Collectors;
  * 任务执行器 - 按依赖顺序并行执行任务
  */
 @Component
-public class TaskExecutor {
+public class PlanTaskExecutor {
 
-    private static final Logger log = LoggerFactory.getLogger(TaskExecutor.class);
+    private static final Logger log = LoggerFactory.getLogger(PlanTaskExecutor.class);
 
     private final AgentOrchestrator agentOrchestrator;
     private final TaskPlanner taskPlanner;
     private final Replanner replanner;
-    private final ExecutorService executor;
+    private volatile ExecutorService executor;
 
     @Value("${planner.max-retries:2}")
     private int maxRetries;
@@ -33,58 +33,69 @@ public class TaskExecutor {
     @Value("${planner.parallel-threads:8}")
     private int parallelThreads;
 
-    public TaskExecutor(AgentOrchestrator agentOrchestrator,
+    public PlanTaskExecutor(AgentOrchestrator agentOrchestrator,
                         TaskPlanner taskPlanner,
                         Replanner replanner) {
         this.agentOrchestrator = agentOrchestrator;
         this.taskPlanner = taskPlanner;
         this.replanner = replanner;
-        this.executor = Executors.newFixedThreadPool(parallelThreads);
+    }
+
+    private ExecutorService getExecutor() {
+        if (executor == null) {
+            synchronized (this) {
+                if (executor == null) {
+                    int threads = parallelThreads > 0 ? parallelThreads : 8;
+                    executor = Executors.newFixedThreadPool(threads);
+                }
+            }
+        }
+        return executor;
     }
 
     /**
      * 执行整个 DAG，按依赖顺序并行执行就绪任务
      */
     public TaskDAG execute(TaskDAG dag) {
-        log.info("[TaskExecutor] 开始执行 DAG，共 {} 个任务", dag.getTasks().size());
+        log.info("[PlanTaskExecutor] 开始执行 DAG，共 {} 个任务", dag.getTasks().size());
 
         int iteration = 0;
         final int maxIterations = dag.getTasks().size() * (maxRetries + 1) + 10;
 
         while (!dag.isComplete() && iteration < maxIterations) {
             iteration++;
-            log.info("[TaskExecutor] === 执行迭代 #{} ===", iteration);
+            log.info("[PlanTaskExecutor] === 执行迭代 #{} ===", iteration);
 
             List<PlanTask> readyTasks = dag.getReadyTasks();
             if (readyTasks.isEmpty()) {
-                log.info("[TaskExecutor] 没有就绪任务，检查是否完成或失败");
+                log.info("[PlanTaskExecutor] 没有就绪任务，检查是否完成或失败");
                 if (dag.hasFailed()) {
-                    log.warn("[TaskExecutor] 检测到失败任务，终止执行");
+                    log.warn("[PlanTaskExecutor] 检测到失败任务，终止执行");
                     break;
                 }
                 // 所有非完成/取消的任务都有未满足的依赖，但无环 DAG 不应出现这种情况
                 if (!dag.isComplete()) {
-                    log.warn("[TaskExecutor] 存在无法执行的任务，可能 DAG 有问题");
+                    log.warn("[PlanTaskExecutor] 存在无法执行的任务，可能 DAG 有问题");
                     markRemainingBlocked(dag);
                 }
                 break;
             }
 
-            log.info("[TaskExecutor] 并行执行 {} 个就绪任务", readyTasks.size());
+            log.info("[PlanTaskExecutor] 并行执行 {} 个就绪任务", readyTasks.size());
             executeReadyTasksInParallel(dag, readyTasks);
 
             // 检查失败任务并尝试重规划
             if (dag.hasFailed()) {
                 List<PlanTask> failedTasks = dag.getFailedTasks();
-                log.warn("[TaskExecutor] 有 {} 个任务失败，尝试重规划", failedTasks.size());
+                log.warn("[PlanTaskExecutor] 有 {} 个任务失败，尝试重规划", failedTasks.size());
 
                 for (PlanTask failedTask : failedTasks) {
                     if (failedTask.getRetryCount() < maxRetries) {
-                        log.info("[TaskExecutor] 对失败任务 {} 进行重规划 (第 {} 次重试)",
+                        log.info("[PlanTaskExecutor] 对失败任务 {} 进行重规划 (第 {} 次重试)",
                                 failedTask.getId(), failedTask.getRetryCount() + 1);
                         dag = replanner.replan(dag, failedTask);
                     } else {
-                        log.error("[TaskExecutor] 任务 {} 已超过最大重试次数 ({})，标记为最终失败",
+                        log.error("[PlanTaskExecutor] 任务 {} 已超过最大重试次数 ({})，标记为最终失败",
                                 failedTask.getId(), maxRetries);
                         failedTask.setState(TaskState.FAILED);
                     }
@@ -93,10 +104,10 @@ public class TaskExecutor {
         }
 
         if (iteration >= maxIterations) {
-            log.error("[TaskExecutor] 达到最大迭代次数限制，强制终止");
+            log.error("[PlanTaskExecutor] 达到最大迭代次数限制，强制终止");
         }
 
-        log.info("[TaskExecutor] DAG 执行结束，完成={}, 失败={}", dag.isComplete(), dag.hasFailed());
+        log.info("[PlanTaskExecutor] DAG 执行结束，完成={}, 失败={}", dag.isComplete(), dag.hasFailed());
         return dag;
     }
 
@@ -109,7 +120,7 @@ public class TaskExecutor {
         for (PlanTask task : readyTasks) {
             CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
                 executeSingleTask(dag, task);
-            }, executor);
+            }, getExecutor());
             futures.add(future);
         }
 
@@ -122,7 +133,7 @@ public class TaskExecutor {
      */
     private void executeSingleTask(TaskDAG dag, PlanTask task) {
         task.setState(TaskState.IN_PROGRESS);
-        log.info("[TaskExecutor] 开始执行任务 {}: {}", task.getId(), task.getDescription());
+        log.info("[PlanTaskExecutor] 开始执行任务 {}: {}", task.getId(), task.getDescription());
 
         try {
             // 通过 SubAgent 执行任务
@@ -137,10 +148,10 @@ public class TaskExecutor {
 
             task.setResult(result);
             task.setState(TaskState.COMPLETED);
-            log.info("[TaskExecutor] 任务 {} 完成，迭代次数: {}", task.getId(), response.getTotalIterations());
+            log.info("[PlanTaskExecutor] 任务 {} 完成，迭代次数: {}", task.getId(), response.getTotalIterations());
 
         } catch (Exception e) {
-            log.error("[TaskExecutor] 任务 {} 执行失败: {}", task.getId(), e.getMessage(), e);
+            log.error("[PlanTaskExecutor] 任务 {} 执行失败: {}", task.getId(), e.getMessage(), e);
             task.setError(e.getMessage());
             task.setRetryCount(task.getRetryCount() + 1);
             task.setState(TaskState.FAILED);
@@ -159,6 +170,8 @@ public class TaskExecutor {
     }
 
     public void shutdown() {
-        executor.shutdown();
+        if (executor != null) {
+            executor.shutdown();
+        }
     }
 }

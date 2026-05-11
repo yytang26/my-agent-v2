@@ -2,12 +2,16 @@ package com.agent.cli;
 
 import com.agent.core.AgentLoop;
 import com.agent.core.AgentResponse;
+import com.agent.eval.AgentEvaluator;
+import com.agent.eval.EvalReport;
+import com.agent.eval.EvalTestCase;
 import com.agent.memory.ConversationMemory;
 import com.agent.mcp.PluginLoader;
+import com.agent.observability.MetricsCollector;
 import com.agent.permission.PermissionManager;
 import com.agent.permission.PermissionPolicy;
 import com.agent.planner.TaskDAG;
-import com.agent.planner.TaskExecutor;
+import com.agent.planner.PlanTaskExecutor;
 import com.agent.planner.TaskPlanner;
 import com.agent.rag.Chunk;
 import com.agent.rag.RagPipeline;
@@ -60,7 +64,9 @@ public class CommandHandler {
     private final CommandRegistry commandRegistry;
     private final TemplateRenderer templateRenderer;
     private final TaskPlanner taskPlanner;
-    private final TaskExecutor taskExecutor;
+    private final PlanTaskExecutor planTaskExecutor;
+    private final AgentEvaluator agentEvaluator;
+    private final MetricsCollector metricsCollector;
 
     private volatile TaskDAG currentPlanDag;
 
@@ -81,7 +87,9 @@ public class CommandHandler {
                           CommandRegistry commandRegistry,
                           TemplateRenderer templateRenderer,
                           TaskPlanner taskPlanner,
-                          TaskExecutor taskExecutor) {
+                          PlanTaskExecutor planTaskExecutor,
+                          AgentEvaluator agentEvaluator,
+                          MetricsCollector metricsCollector) {
         this.tokenTracker = tokenTracker;
         this.conversationMemory = conversationMemory;
         this.toolRegistry = toolRegistry;
@@ -99,7 +107,9 @@ public class CommandHandler {
         this.commandRegistry = commandRegistry;
         this.templateRenderer = templateRenderer;
         this.taskPlanner = taskPlanner;
-        this.taskExecutor = taskExecutor;
+        this.planTaskExecutor = planTaskExecutor;
+        this.agentEvaluator = agentEvaluator;
+        this.metricsCollector = metricsCollector;
     }
 
     public boolean isCommand(String input) {
@@ -132,6 +142,8 @@ public class CommandHandler {
             case "/skills" -> handleSkills();
             case "/commands" -> handleCommands();
             case "/plan" -> handlePlan(parts.length > 1 ? parts[1].trim() : null);
+            case "/eval" -> handleEval(parts.length > 1 ? parts[1].trim() : null);
+            case "/metrics" -> handleMetrics();
             default -> "未知命令: " + command + "\n输入 /help 查看可用命令。";
         };
     }
@@ -159,6 +171,9 @@ public class CommandHandler {
                   /commands       - 列出可用命令
                   /plan <task>    - 将复杂任务分解为子任务并执行
                   /plan status    - 查看当前规划状态
+                  /eval           - 运行评估套件
+                  /eval report    - 显示最近一次评估报告
+                  /metrics        - 显示系统指标
                   /exit        - 退出程序
                 """;
     }
@@ -546,7 +561,7 @@ public class CommandHandler {
             sb.append(dag.getSummary()).append("\n\n");
             sb.append("开始执行...\n");
 
-            var resultDag = taskExecutor.execute(dag);
+            var resultDag = planTaskExecutor.execute(dag);
             currentPlanDag = resultDag;
 
             sb.append("\n=== 执行完成 ===\n\n");
@@ -565,5 +580,55 @@ public class CommandHandler {
         } catch (Exception e) {
             return "任务规划/执行失败: " + e.getMessage();
         }
+    }
+
+    private String handleEval(String arg) {
+        if (arg != null && arg.equalsIgnoreCase("report")) {
+            EvalReport report = agentEvaluator.getLastReport();
+            if (report == null) {
+                return "还没有运行过评估。使用 /eval 运行评估套件。";
+            }
+            return report.toString();
+        }
+
+        // 运行评估
+        List<EvalTestCase> testCases = agentEvaluator.loadDefaultTestCases();
+        if (testCases.isEmpty()) {
+            return "未找到测试用例。";
+        }
+
+        EvalReport report = agentEvaluator.evaluate(testCases);
+        return report.toString();
+    }
+
+    private String handleMetrics() {
+        MetricsCollector.MetricsSummary summary = metricsCollector.getSummary();
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== 系统指标 ===\n\n");
+        sb.append(String.format("总请求数:     %d%n", summary.totalRequests()));
+        sb.append(String.format("总 Token:     %d (输入: %d, 输出: %d)%n",
+                summary.totalTokens(), summary.totalInputTokens(), summary.totalOutputTokens()));
+        sb.append(String.format("总费用:       $%.4f%n", summary.totalCostUsd()));
+        sb.append(String.format("平均响应时间: %.1f ms%n", summary.avgResponseTimeMs()));
+        sb.append(String.format("工具调用次数: %d%n", summary.totalToolCalls()));
+        sb.append(String.format("错误次数:     %d (错误率: %.1f%%)%n",
+                summary.totalErrors(), summary.errorRate() * 100));
+
+        if (!summary.toolCallCounts().isEmpty()) {
+            sb.append("\n工具调用统计:\n");
+            summary.toolCallCounts().entrySet().stream()
+                    .sorted((a, b) -> Long.compare(b.getValue().get(), a.getValue().get()))
+                    .forEach(entry -> sb.append(String.format("  %-20s: %d%n", entry.getKey(), entry.getValue().get())));
+        }
+
+        if (!summary.errorCounts().isEmpty()) {
+            sb.append("\n错误分类统计:\n");
+            summary.errorCounts().entrySet().stream()
+                    .sorted((a, b) -> Long.compare(b.getValue().get(), a.getValue().get()))
+                    .forEach(entry -> sb.append(String.format("  %-20s: %d%n", entry.getKey(), entry.getValue().get())));
+        }
+
+        return sb.toString().trim();
     }
 }

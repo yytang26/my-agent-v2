@@ -1,0 +1,107 @@
+[
+  {
+    "id": "1",
+    "input": "现在几点",
+    "expectedBehavior": "调用get_current_time",
+    "requiredTools": ["get_current_time"],
+    "category": "tool_use"
+  },
+  {
+    "id": "2",
+    "input": "列出当前目录",
+    "expectedBehavior": "调用list_directory",
+    "requiredTools": ["list_directory"],
+    "category": "file"
+  },
+  {
+    "id": "3",
+    "input": "你好",
+    "expectedBehavior": "不调用工具，直接回复",
+    "requiredTools": [],
+    "category": "general"
+  },
+  {
+    "id": "4",
+    "input": "读取 /tmp/test.txt 文件的内容",
+    "expectedBehavior": "调用read_file",
+    "requiredTools": ["read_file"],
+    "category": "file"
+  },
+  {
+    "id": "5",
+    "input": "在 /tmp 目录下创建 test.txt 文件，内容为 hello",
+    "expectedBehavior": "调用write_file",
+    "requiredTools": ["write_file"],
+    "category": "file"
+  },
+  {
+    "id": "6",
+    "input": "搜索 /tmp 目录下包含 error 的文件",
+    "expectedBehavior": "调用grep",
+    "requiredTools": ["grep"],
+    "category": "code"
+  },
+  {
+    "id": "7",
+    "input": "执行 ls -la 命令",
+    "expectedBehavior": "调用run_bash",
+    "requiredTools": ["run_bash"],
+    "category": "code"
+  },
+  {
+    "id": "8",
+    "input": "谢谢你",
+    "expectedBehavior": "不调用工具，礼貌回复",
+    "requiredTools": [],
+    "category": "general"
+  },
+  {
+    "id": "9",
+    "input": "查找 /tmp 目录下所有的 .txt 文件",
+    "expectedBehavior": "调用glob",
+    "requiredTools": ["glob"],
+    "category": "code"
+  },
+  {
+    "id": "10",
+    "input": "编辑 /tmp/test.txt 文件，将 hello 替换为 world",
+    "expectedBehavior": "调用edit_file",
+    "requiredTools": ["edit_file"],
+    "category": "file"
+  },
+  {
+    "id": "11",
+    "input": "1+1等于几",
+    "expectedBehavior": "不调用工具，直接回答",
+    "requiredTools": [],
+    "category": "general"
+  },
+  {
+    "id": "12",
+    "input": "搜索知识库中关于 Java 的内容",
+    "expectedBehavior": "调用rag_search",
+    "requiredTools": ["rag_search"],
+    "category": "rag"
+  },
+  {
+    "id": "13",
+    "input": "什么是 Spring Boot",
+    "expectedBehavior": "直接回复知识性问题",
+    "requiredTools": [],
+    "category": "general"
+  },
+  {
+    "id": "14",
+    "input": "帮我审查 /tmp/Test.java 的代码",
+    "expectedBehavior": "调用code_review技能",
+    "requiredTools": [],
+    "category": "skill"
+  },
+  {
+    "id": "15",
+    "input": "今天的日期是什么",
+    "expectedBehavior": "调用get_current_time或直接回答",
+    "requiredTools": [],
+    "category": "general"
+  }
+]

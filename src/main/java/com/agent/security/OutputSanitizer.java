@@ -25,7 +25,7 @@ public class OutputSanitizer {
     private static final Pattern EMAIL_PATTERN = Pattern.compile("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
 
     // File paths with username
-    private static final Pattern HOME_PATH = Pattern.compile("(/Users/|/home/|C:\\\\\\Users\\\\)[a-zA-Z0-9_-]+");
+    private static final Pattern HOME_PATH = Pattern.compile("(/Users/|/home/|C:\\\\Users\\\\)[a-zA-Z0-9_-]+");
     private static final Pattern ABSOLUTE_HOME = Pattern.compile("/Users/[a-zA-Z0-9_-]+");
 
     // Environment variables with sensitive values
