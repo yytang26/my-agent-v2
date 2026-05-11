@@ -6,6 +6,9 @@ import com.agent.memory.ConversationMemory;
 import com.agent.mcp.PluginLoader;
 import com.agent.permission.PermissionManager;
 import com.agent.permission.PermissionPolicy;
+import com.agent.planner.TaskDAG;
+import com.agent.planner.TaskExecutor;
+import com.agent.planner.TaskPlanner;
 import com.agent.rag.Chunk;
 import com.agent.rag.RagPipeline;
 import com.agent.rag.VectorStore;
@@ -56,6 +59,10 @@ public class CommandHandler {
     private final SkillRegistry skillRegistry;
     private final CommandRegistry commandRegistry;
     private final TemplateRenderer templateRenderer;
+    private final TaskPlanner taskPlanner;
+    private final TaskExecutor taskExecutor;
+
+    private volatile TaskDAG currentPlanDag;
 
     public CommandHandler(TokenTracker tokenTracker,
                           ConversationMemory conversationMemory,
@@ -72,7 +79,9 @@ public class CommandHandler {
                           AgentLoop agentLoop,
                           SkillRegistry skillRegistry,
                           CommandRegistry commandRegistry,
-                          TemplateRenderer templateRenderer) {
+                          TemplateRenderer templateRenderer,
+                          TaskPlanner taskPlanner,
+                          TaskExecutor taskExecutor) {
         this.tokenTracker = tokenTracker;
         this.conversationMemory = conversationMemory;
         this.toolRegistry = toolRegistry;
@@ -89,6 +98,8 @@ public class CommandHandler {
         this.skillRegistry = skillRegistry;
         this.commandRegistry = commandRegistry;
         this.templateRenderer = templateRenderer;
+        this.taskPlanner = taskPlanner;
+        this.taskExecutor = taskExecutor;
     }
 
     public boolean isCommand(String input) {
@@ -120,6 +131,7 @@ public class CommandHandler {
             case "/test" -> handleTemplateCommand("generate-test", parts.length > 1 ? parts[1].trim() : null);
             case "/skills" -> handleSkills();
             case "/commands" -> handleCommands();
+            case "/plan" -> handlePlan(parts.length > 1 ? parts[1].trim() : null);
             default -> "未知命令: " + command + "\n输入 /help 查看可用命令。";
         };
     }
@@ -145,6 +157,8 @@ public class CommandHandler {
                   /test <file>    - 生成测试
                   /skills         - 列出可用技能
                   /commands       - 列出可用命令
+                  /plan <task>    - 将复杂任务分解为子任务并执行
+                  /plan status    - 查看当前规划状态
                   /exit        - 退出程序
                 """;
     }
@@ -504,5 +518,52 @@ public class CommandHandler {
             sb.append(String.format("  %s%n", cmd));
         }
         return sb.toString().trim();
+    }
+
+    private String handlePlan(String arg) {
+        if (arg == null || arg.isBlank()) {
+            return """
+                    用法:
+                      /plan <task>    - 将复杂任务分解为子任务并执行
+                      /plan status    - 查看当前规划状态
+                    例如: /plan 分析这个项目的代码结构并生成文档
+                    """;
+        }
+
+        if ("status".equalsIgnoreCase(arg)) {
+            if (currentPlanDag == null) {
+                return "当前没有正在执行的任务规划。\n用法: /plan <task> - 开始新的任务规划";
+            }
+            return currentPlanDag.getSummary();
+        }
+
+        // 开始新的任务规划
+        try {
+            var dag = taskPlanner.plan(arg);
+            currentPlanDag = dag;
+            StringBuilder sb = new StringBuilder();
+            sb.append("=== 任务规划完成 ===\n\n");
+            sb.append(dag.getSummary()).append("\n\n");
+            sb.append("开始执行...\n");
+
+            var resultDag = taskExecutor.execute(dag);
+            currentPlanDag = resultDag;
+
+            sb.append("\n=== 执行完成 ===\n\n");
+            sb.append(resultDag.getSummary());
+
+            if (resultDag.isComplete()) {
+                sb.append("\n\n=== 最终结果汇总 ===\n");
+                for (var task : resultDag.getTasks().values()) {
+                    if (task.getResult() != null) {
+                        sb.append(String.format("[%s] %s%n%n", task.getId(), task.getResult()));
+                    }
+                }
+            }
+
+            return sb.toString().trim();
+        } catch (Exception e) {
+            return "任务规划/执行失败: " + e.getMessage();
+        }
     }
 }
