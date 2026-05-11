@@ -34,6 +34,14 @@ agent:
       #   command: "npx"
       #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
       #   transport-type: "stdio"
+  security:
+    injection-detection: true
+    sandbox-enabled: true
+    risk-threshold: 0.7
+    blocked-commands:
+      - "rm -rf /"
+      - "mkfs"
+      - "dd if=/dev/zero"
 
 llm:
   provider: claude  # claude | openai | mock

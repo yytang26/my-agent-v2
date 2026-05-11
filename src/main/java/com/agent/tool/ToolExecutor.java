@@ -1,6 +1,7 @@
 package com.agent.tool;
 
 import com.agent.permission.PermissionManager;
+import com.agent.security.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -18,19 +19,87 @@ public class ToolExecutor {
 
     private final ToolRegistry toolRegistry;
     private final PermissionManager permissionManager;
+    private final SecurityGateway securityGateway;
 
-    public ToolExecutor(ToolRegistry toolRegistry, PermissionManager permissionManager) {
+    public ToolExecutor(ToolRegistry toolRegistry, PermissionManager permissionManager, SecurityGateway securityGateway) {
         this.toolRegistry = toolRegistry;
         this.permissionManager = permissionManager;
+        this.securityGateway = securityGateway;
     }
 
     public ToolResult execute(String toolName, String toolUseId, Map<String, Object> arguments) {
-        // 权限检查
+        return execute(toolName, toolUseId, arguments, null);
+    }
+
+    public ToolResult execute(String toolName, String toolUseId, Map<String, Object> arguments, String userInput) {
+        // 1. Security check
+        SecurityCheckResult securityCheck = securityGateway.check(toolName, arguments, userInput);
+
+        if (!securityCheck.isAllowed()) {
+            log.warn("Security blocked tool '{}': {}", toolName, securityCheck.getMessage());
+            return ToolResult.error(toolUseId, "Security check failed: " + securityCheck.getMessage());
+        }
+
+        // 2. Human escalation approval
+        if (securityCheck.isNeedsHumanApproval()) {
+            EscalationDecision escalation = securityCheck.getEscalationDecision();
+            boolean approved = securityGateway.getHumanEscalation().requestHumanApproval(
+                escalation != null ? escalation.getMessage() : "High risk operation requires approval: " + toolName
+            );
+            if (!approved) {
+                log.warn("Human denied approval for tool '{}': {}", toolName, securityCheck.getMessage());
+                return ToolResult.error(toolUseId, "Human approval denied: " + securityCheck.getMessage());
+            }
+        }
+
+        // 3. Permission check
         if (!permissionManager.checkPermission(toolName, arguments)) {
             log.warn("用户拒绝了工具执行: {}", toolName);
             return ToolResult.error(toolUseId, "用户拒绝了该操作");
         }
 
+        // 4. Sandbox execution for bash
+        if (securityCheck.isUseSandbox() && "bash".equals(toolName)) {
+            return executeBashInSandbox(toolName, toolUseId, arguments);
+        }
+
+        // 5. Normal execution
+        ToolResult result = doExecute(toolName, toolUseId, arguments);
+
+        // 6. Sanitize output
+        if (result != null && !result.isError() && result.getContent() != null) {
+            String sanitized = securityGateway.sanitizeOutput(result.getContent());
+            if (!sanitized.equals(result.getContent())) {
+                result = ToolResult.success(toolUseId, sanitized);
+            }
+        }
+
+        return result;
+    }
+
+    private ToolResult executeBashInSandbox(String toolName, String toolUseId, Map<String, Object> arguments) {
+        String command = "";
+        if (arguments != null && arguments.containsKey("command")) {
+            Object cmdObj = arguments.get("command");
+            command = cmdObj != null ? cmdObj.toString() : "";
+        }
+
+        log.info("Executing bash command in sandbox: {}", command);
+        SandboxResult sandboxResult = securityGateway.getSandboxExecutor().execute(command, null);
+
+        if (!sandboxResult.isAllowed()) {
+            log.warn("Sandbox blocked bash command: {}", sandboxResult.getBlockedReason());
+            return ToolResult.error(toolUseId, "Sandbox blocked: " + sandboxResult.getBlockedReason());
+        }
+
+        String output = sandboxResult.getOutput();
+        // Sanitize output
+        output = securityGateway.sanitizeOutput(output);
+
+        return ToolResult.success(toolUseId, output);
+    }
+
+    private ToolResult doExecute(String toolName, String toolUseId, Map<String, Object> arguments) {
         Optional<ToolRegistry.ToolMethod> toolOpt = toolRegistry.getTool(toolName);
         if (toolOpt.isPresent()) {
             return executeAnnotatedTool(toolOpt.get(), toolName, toolUseId, arguments);
