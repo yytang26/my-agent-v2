@@ -1,0 +1,6 @@
+# Mock profile - uses MockAiService
+# Simulated AI delay (ms)
+ai:
+  mock:
+    delay-min: 500
+    delay-max: 1500
