@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* 成人模式（默认） */
+:root {
+  --color-primary: #4F46E5;
+  --color-primary-light: #6366F1;
+  --color-bg: #F9FAFB;
+  --color-card-bg: #FFFFFF;
+  --color-text: #1F2937;
+  --color-text-secondary: #6B7280;
+  --border-radius: 8px;
+  --font-size-base: 16px;
+  --font-size-lg: 20px;
+  --font-size-xl: 24px;
+}
+
+/* 儿童模式 */
+[data-mode="child"] {
+  --color-primary: #F59E0B;
+  --color-primary-light: #FBBF24;
+  --color-bg: #FFFBEB;
+  --color-card-bg: #FFFFFF;
+  --color-text: #92400E;
+  --color-text-secondary: #B45309;
+  --border-radius: 16px;
+  --font-size-base: 18px;
+  --font-size-lg: 24px;
+  --font-size-xl: 30px;
+}
